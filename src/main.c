@@ -33,6 +33,9 @@ Result ejecutar_nativa_proxy(const char* nombre, Result args[], int n_args) {
 #endif
 
 #ifndef ITS_EMBED
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 typedef struct {
     char* path;
@@ -79,7 +82,8 @@ char* leer_archivo_texto(const char* path) {
     }
     fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
     char* c = malloc(sz + 1);
-    if (fread(c, 1, sz, f) != (size_t)sz) {
+    size_t nr = fread(c, 1, sz, f);
+    if (nr != (size_t)sz) {
         free(c);
         fclose(f);
         return NULL;
@@ -252,7 +256,7 @@ int main(int argc, char** argv) {
         
         if (only_c) printf("Generando codigo C para %s -> %s...\n", argv[1], out_name);
         else if (compile_bc) printf("Compilando Bytecode %s -> %s...\n", argv[1], out_name);
-        else printf("Compilando Itsuki v4.4 %s -> %s.exe...\n", argv[1], out_name);
+        else printf("Compilando Itsuki v4.5 %s -> %s.exe...\n", argv[1], out_name);
 
         collect_dependencies(argv[1]);
         
@@ -376,7 +380,7 @@ int main(int argc, char** argv) {
             );
             
             if(system(cmd) == 0) {
-                printf("¡Exito! %s.exe creado con optimizacion -O3 -march=native.\n", out_name);
+                printf("¡Exito! %s creado con optimizacion -O3 -march=native.\n", out_name);
                 if (!keep_temp) remove("bundle.c");
                 else printf("Info: bundle.c conservado (--keep-temp).\n");
             }
@@ -407,7 +411,8 @@ int main(int argc, char** argv) {
         FILE* f = fopen(argv[2], "rb");
         if (!f) { printf("Archivo no encontrado: %s\n", argv[2]); return 1; }
         fseek(f, 0, SEEK_END); long s = ftell(f); fseek(f, 0, SEEK_SET);
-        char* b = malloc(s + 1); fread(b, 1, s, f); b[s] = 0; fclose(f);
+        char* b = malloc(s + 1); 
+        size_t nr_lint = fread(b, 1, s, f); b[nr_lint] = 0; fclose(f);
         itsuki_init();
         itsuki_lint(b);
         free(b);
@@ -416,7 +421,8 @@ int main(int argc, char** argv) {
 
     FILE* f = fopen(argv[1], "rb"); if(!f) { printf("Archivo no encontrado: %s\n", argv[1]); return 1; }
     fseek(f, 0, SEEK_END); long s = ftell(f); fseek(f, 0, SEEK_SET);
-    char* b = malloc(s + 1); long n = fread(b, 1, s, f); b[n] = 0; fclose(f);
+    char* b = malloc(s + 1); 
+    size_t nr_main = fread(b, 1, s, f); b[nr_main] = 0; fclose(f);
     
     itsuki_init();
     bool do_lint = false;

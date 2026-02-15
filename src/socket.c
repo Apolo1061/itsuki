@@ -1,9 +1,22 @@
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
+#ifdef _WIN32
+    #ifndef WIN32_LEAN_AND_MEAN
+    #define WIN32_LEAN_AND_MEAN
+    #endif
+    #include <winsock2.h>
+    #include <ws2tcpip.h>
+    #include <windows.h>
+#else
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <arpa/inet.h>
+    #include <netdb.h>
+    #include <unistd.h>
+    #include <errno.h>
+    typedef int SOCKET;
+    #define INVALID_SOCKET -1
+    #define SOCKET_ERROR -1
 #endif
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <windows.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
