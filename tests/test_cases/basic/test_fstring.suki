@@ -1,0 +1,7 @@
+sea nombre = "Apolo"
+sea uid = "linux_135"
+print(f"Hola {nombre}, uid = {uid}")
+
+sea a = 10
+sea b = 20
+print(f"La suma de {a} + {b} es {a + b}")

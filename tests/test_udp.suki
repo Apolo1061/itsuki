@@ -1,0 +1,28 @@
+importar "modules/socket" como net
+
+print("Iniciando prueba UDP...")
+
+sea s = net.socket(net.AF_INET, net.SOCK_DGRAM)
+print("Socket UDP creado")
+
+net.bind(s, "127.0.0.1", 9999)
+print("Bind a 127.0.0.1:9999 exitoso")
+
+print("Enviando mensaje...")
+net.sendto(s, "Hola UDP", "127.0.0.1", 9999)
+
+print("Esperando recibir...")
+sea res = net.recvfrom(s, 1024)
+
+sea datos = res[0]
+sea addr = res[1]
+
+print("Recibido: '" + datos + "' de " + addr)
+
+si (datos == "Hola UDP") {
+    print("TEST UDP PASADO")
+} sino {
+    print("TEST UDP FALLADO: Datos incorrectos")
+}
+
+net.close(s)

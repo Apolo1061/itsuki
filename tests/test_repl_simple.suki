@@ -1,0 +1,6 @@
+sea a = 1
+print("a = ", a)
+sea b = 2 + 3
+print("b = ", b)
+sea nombre = "Itsuki"
+print("Hola ", nombre)

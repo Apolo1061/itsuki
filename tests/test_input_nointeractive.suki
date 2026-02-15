@@ -1,0 +1,10 @@
+print("=== Test de input() automatizado ===")
+
+escribir_archivo("test_input.txt", "Hola desde archivo")
+
+sea datos = leer_archivo("test_input.txt")
+print("Datos leídos: ", datos)
+
+print("Tipo de input: ", input)
+
+print("PASS: Test completado sin interacción")

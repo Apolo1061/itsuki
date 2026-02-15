@@ -1,0 +1,22 @@
+c_incluir "<stdio.h>"
+c_incluir "<math.h>"
+
+c_extern funcion puts(s: string): int
+c_extern funcion cos(x: double): double
+c_extern funcion abs(x: int): int
+
+puts("Llamando a puts")
+
+sea angulo = 3.14159
+sea c = cos(angulo)
+printf("cos(PI) = ", c)
+
+if (c < -0.99) {
+    puts("verificado: cos(PI) es aprox -1")
+} else {
+    puts("fallo: cos(PI) incorrecto")
+}
+
+sea a = abs(-123)
+printf("abs(-123) = ", a)
+

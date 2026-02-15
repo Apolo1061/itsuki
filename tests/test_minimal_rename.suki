@@ -1,0 +1,6 @@
+print("--- Inicio ---")
+sea s = string(123)
+print("S: ", s)
+sea i = int("456")
+print("I: ", i)
+print("Fin")

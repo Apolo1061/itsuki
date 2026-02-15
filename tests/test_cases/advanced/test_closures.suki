@@ -1,0 +1,26 @@
+# Test de Clausuras Léxicas
+funcion crear_sumador(n) {
+    retornar lambda(x) {
+        retornar n + x
+    }
+}
+
+sea suma5 = crear_sumador(5)
+sea suma10 = crear_sumador(10)
+
+print("5 + 20 = ", suma5(20))
+print("10 + 20 = ", suma10(20))
+
+funcion duplicador_dec(f) {
+    retornar lambda(x) {
+        print("Duplicando resultado de la funcion...")
+        retornar f(x) * 2
+    }
+}
+
+@duplicador_dec
+funcion cuadrado(n) {
+    retornar n * n
+}
+
+print("Resultado cuadrado(4) duplicado: ", cuadrado(4))

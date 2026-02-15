@@ -1,0 +1,3 @@
+sea x = 10
+sea y = 20
+print(string(x))

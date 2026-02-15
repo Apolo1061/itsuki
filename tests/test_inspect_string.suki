@@ -1,0 +1,3 @@
+sea s = string
+print("Tipo de s: ", tipo_de(s))
+print("Valor de s: ", s)

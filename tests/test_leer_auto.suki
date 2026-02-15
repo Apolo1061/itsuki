@@ -1,0 +1,11 @@
+sea contenido = "Hola desde archivo de prueba"
+escribir_archivo("temp_input.txt", contenido)
+
+sea datos = leer_archivo("temp_input.txt")
+print("Leido desde archivo: ", datos)
+
+si (datos == contenido) {
+    print("✓ Test de lectura pasado correctamente")
+} sino {
+    print("✗ Test de lectura fallido")
+}

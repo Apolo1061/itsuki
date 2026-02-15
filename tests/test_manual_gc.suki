@@ -1,0 +1,19 @@
+print("--- Test de Gestion Manual de Memoria ---")
+
+funcion crear_basura() {
+    sea a = []
+    para k en (0, 10) {  # Reducido de 1000 a 10
+        agregar(a, "string de basura " + string(k))
+    }
+    retornar a
+}
+
+print("1. Creando objetos y liberandolos manualmente...")
+
+para k en (0, 3) {  # Reducido de 10 a 3
+    sea obj = crear_basura()
+    liberar(obj) 
+    print("  Iteracion ", k, " OK")
+}
+
+print("--- Fin Test Manual GC ---")

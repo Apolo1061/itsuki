@@ -1,0 +1,10 @@
+# Prueba de Constant Folding
+# El compilador deberia pre-calcular 5 + 5 * 2 = 15
+sea a = 5 + 5 * 2;
+print("Resultado (esperado 15): ", a);
+
+sea b = "hola " + "mundo";
+print("Resultado (esperado hola mundo): ", b);
+
+sea c = a + 10;
+print("Resultado (esperado 25): ", c);

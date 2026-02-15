@@ -1,0 +1,25 @@
+importar "modules/socket" como net
+
+print("Probando socket...")
+
+sea s = net.socket(net.AF_INET, net.SOCK_STREAM)
+print("Socket creado: " + string(s))
+
+print("Conectando a example.com...")
+net.connect(s, "example.com", 80)
+print("Conectado!")
+
+sea request = "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n"
+net.send(s, request)
+print("Solicitud enviada")
+
+sea respuesta = net.recv(s, 1024)
+print("Respuesta recibida (" + string(largo(respuesta)) + " bytes):")
+si (largo(respuesta) > 0) {
+    print(subcadena(respuesta, 0, 100) + "...") 
+} sino {
+    print("(Respuesta vacia)")
+}
+
+net.close(s)
+print("Socket cerrado")

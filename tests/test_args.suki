@@ -1,0 +1,9 @@
+sea argumentos = cli_args()
+print("Argumentos recibidos: " + largo(argumentos))
+para (sea i = 0; i < largo(argumentos); i = i + 1) {
+    print("Arg " + i + ": " + argumentos[i])
+}
+
+print("Plataforma: " + platform())
+print("Probando system('echo Hola')...")
+system("echo Hola Mundo")

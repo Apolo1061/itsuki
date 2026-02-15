@@ -1,0 +1,71 @@
+#     _   _                    _     ___ 
+#    (_) | | __  _   _   ___  | |_  |_ _|
+#    | | | |/ / | | | | / __| | __|  | | 
+#    | | |   <  | |_| | \__ \ | |_   | | 
+#    |_| |_|\_\  \__,_| |___/  \__| |___|
+#    
+# Creador: Apolo
+# Fecha: 2026-02-14
+# Version: 2.4
+# Descripcion: Modulo Socket de itsuki
+# Soporta TCP, UDP y RAW
+#
+
+exportar sea AF_INET = 2
+exportar sea SOCK_STREAM = 1
+exportar sea SOCK_DGRAM = 2
+exportar sea SOCK_RAW = 3
+
+exportar funcion socket(familia, tipo) {
+    si (tipo_de(familia) == "nulo") { familia = 2 }
+    si (tipo_de(tipo) == "nulo") { tipo = 1 }
+    retornar _socket_socket(familia, tipo)
+}
+
+exportar funcion bind(sock, host, port) {
+    retornar _socket_bind(sock, host, port)
+}
+
+exportar funcion listen(sock, backlog) {
+    si (tipo_de(backlog) == "nulo") { backlog = 5 }
+    retornar _socket_listen(sock, backlog)
+}
+
+exportar funcion accept(sock) {
+    retornar _socket_accept(sock)
+}
+
+exportar funcion connect(sock, host, port) {
+    retornar _socket_connect(sock, host, port)
+}
+
+exportar funcion send(sock, data) {
+    retornar _socket_send(sock, data)
+}
+
+exportar funcion recv(sock, buflen) {
+    si (tipo_de(buflen) == "nulo") { buflen = 4096 }
+    retornar _socket_recv(sock, buflen)
+}
+
+exportar funcion sendto(sock, data, host, port) {
+     retornar _socket_sendto(sock, data, host, port)
+}
+
+exportar funcion recvfrom(sock, buflen) {
+    si (tipo_de(buflen) == "nulo") { buflen = 4096 }
+    retornar _socket_recvfrom(sock, buflen)
+}
+
+exportar funcion close(sock) {
+    retornar _socket_close(sock)
+}
+
+# Alias para compatibilidad 
+exportar sea leer = recv
+exportar sea escribir = send
+exportar sea cerrar = close
+exportar sea conectar = connect
+exportar sea unir = bind
+exportar sea escuchar = listen
+exportar sea aceptar = accept

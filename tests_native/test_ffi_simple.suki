@@ -1,0 +1,6 @@
+c_incluir "<stdio.h>"
+
+c_extern funcion puts(s: string): int
+
+puts("Test simple FFI")
+puts("Fin del test")

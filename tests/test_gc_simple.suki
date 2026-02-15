@@ -1,0 +1,18 @@
+# Test simplificado de manual GC
+print("Test: Liberar con GC activo")
+
+funcion crear_basura() {
+    sea a = []
+    para k en (0, 100) {
+        agregar(a, "string " + string(k))
+    }
+    retornar a
+}
+
+print("Creando y liberando...")
+sea obj = crear_basura()
+print("Array creado")
+liberar(obj)
+print("✓ Array liberado")
+
+print("=== Test completado ===")

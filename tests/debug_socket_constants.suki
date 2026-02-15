@@ -1,0 +1,3 @@
+exportar sea AF_INET = 2
+exportar sea SOCK_STREAM = 1
+print(AF_INET)

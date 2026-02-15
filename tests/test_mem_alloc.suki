@@ -1,0 +1,9 @@
+print("--- Test de conseguir_mem ---")
+
+sea mem = conseguir_mem(100)
+print("Memoria asignada: " + tipo_de(mem))
+print("Es string? " + string(es_cadena(mem)))
+print("Largo: " + string(largo(mem)))
+
+liberar(mem)
+print("Memoria liberada OK")

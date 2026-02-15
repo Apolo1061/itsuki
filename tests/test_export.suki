@@ -1,0 +1,2 @@
+exportar sea A = 100
+print(A)

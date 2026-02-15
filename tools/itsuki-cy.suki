@@ -1,0 +1,125 @@
+# Itsuki-CY Package Manager
+# Uso: itsuki tools/itsuki-cy.suki [comando] [paquete]
+
+sea args = cli_args()
+sea platform = platform()
+
+exportar funcion help() {
+    print("Itsuki-CY Package Manager v1.0")
+    print("Uso:")
+    print("  install <user/repo>   Instala un paquete desde GitHub")
+    print("  update <user/repo>    Actualiza un paquete instalado")
+    print("  update all            Actualiza todos los paquetes")
+    print("  remove <repo>         Elimina un paquete instalado")
+    print("  list                  Lista paquetes instalados")
+}
+
+si (largo(args) < 1) {
+    help()
+    salir(1)
+}
+
+sea comando = args[0]
+sea target = "nulo"
+si (largo(args) > 1) { target = args[1] }
+
+# Asegurar carpeta modules
+system("if not exist modules mkdir modules") 
+# En linux seria mkdir -p modules pero system call depende de shell.
+# Para cross-platform simple:
+si (platform == "windows") {
+    system("if not exist modules mkdir modules")
+} sino {
+    system("mkdir -p modules")
+}
+
+si (comando == "install") {
+    si (target == "nulo") {
+        print("Error: Se requiere nombre del repositorio (user/repo)")
+        salir(1)
+    }
+    
+    # Extraer nombre del repo
+    sea parts = split(target, "/")
+    si (largo(parts) != 2) {
+        print("Error: Formato invalido. Use user/repo")
+        salir(1)
+    }
+    sea repo_name = parts[1]
+    
+    print("Instalando " + target + " en modules/" + repo_name + "...")
+    
+    # Git clone
+    sea cmd = "git clone https://github.com/" + target + " modules/" + repo_name
+    sea ret = system(cmd)
+    
+    si (ret == 0) {
+        print("Paquete instalado exitosamente.")
+    } sino {
+        print("Error al instalar paquete. Asegurate de tener git instalado.")
+    }
+} sino si (comando == "remove") {
+
+    si (target == "nulo") {
+        print("Error: Se requiere nombre del paquete a eliminar")
+        salir(1)
+    }
+    
+    print("Eliminando modules/" + target + "...")
+    sea cmd = ""
+    si (platform == "windows") {
+        cmd = "rd /s /q modules\\" + target
+    } sino {
+        cmd = "rm -rf modules/" + target
+    }
+    
+    sea ret = system(cmd)
+    si (ret == 0) {
+        print("Paquete eliminado.")
+    } sino {
+        print("Error al eliminar paquete.")
+    }
+} sino si (comando == "update") {
+    si (target == "nulo") {
+        print("Error: Se requiere nombre del paquete o 'all'")
+        salir(1)
+    }
+    
+    si (target == "all") {
+        # List all directories in modules/ and update each
+        # No tenemos list_dir nativo aun... 
+        # Bueno, no podemos hacer update all facilmente sin built-in list_dir.
+        print("Update all no soportado aun (falta list_dir).")
+    } sino {
+        print("Actualizando " + target + "...")
+        sea repo_path = "modules/" + target
+        
+        # Check if exists
+        # system("cd " + repo_path) no persiste el cd.
+        # Necesitamos system("cd path && git pull")
+        
+        sea cmd = ""
+        si (platform == "windows") {
+             cmd = "cd " + repo_path + " && git pull"
+        } sino {
+             cmd = "cd " + repo_path + " && git pull"
+        }
+        
+        sea ret = system(cmd)
+        si (ret == 0) {
+            print("Paquete actualizado.")
+        } sino {
+            print("Error al actualizar (¿existe la carpeta?).")
+        }
+    }
+} sino si (comando == "list") {
+    print("Paquetes instalados en modules/:")
+    si (platform == "windows") {
+        system("dir /b modules")
+    } sino {
+        system("ls modules")
+    }
+} sino {
+    print("Comando desconocido: " + comando)
+    help()
+}

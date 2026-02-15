@@ -1,0 +1,22 @@
+funcion fib(n) {
+    si (n < 2) { retornar n }
+    retornar fib(n-1) + fib(n-2)
+}
+
+funcion fib_iter(n) {
+    sea a = 0
+    sea b = 1
+    mientras (n > 0) {
+        sea temp = a
+        a = b
+        b = temp + b
+        n = n - 1
+    }
+    retornar a
+}
+
+print("Calculando fib(25)...")
+print("Resultado: ", fib(25))
+
+print("Calculando fib_iter(25)...")
+print("Resultado: ", fib_iter(25))

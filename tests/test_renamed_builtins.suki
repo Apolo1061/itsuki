@@ -1,0 +1,13 @@
+# Prueba de funciones renombradas
+
+print("--- Inicio de prueba ---")
+
+sea s = string(123)
+print("String de 123: ", s)
+
+sea i = int("456")
+print("Int de '456': ", i)
+
+print("Escribe algo para probar input(): ")
+
+print("--- Fin de prueba ---")

@@ -1,0 +1,35 @@
+clase Cuenta {
+    privado sea balance
+    estatico sea contador_cuentas = 0
+    
+    funcion init(inicial) {
+        este.balance = inicial
+        Cuenta.contador_cuentas = Cuenta.contador_cuentas + 1
+        print("Cuenta creada con: ", inicial)
+    }
+    
+    funcion ver_balance() {
+        print("Balance: ", este.balance)
+    }
+    
+    estatico funcion logo() {
+        print("Itsuki Bank")
+    }
+}
+
+clase CuentaPremium hereda Cuenta {
+    funcion init(inicial, bono) {
+        super.init(inicial + bono)
+        print("Bono aplicado: ", bono)
+    }
+    
+    funcion ver_balance() {
+        print("--- PREMIUM ---")
+        super.ver_balance()
+    }
+}
+
+Cuenta.logo()
+sea miCuenta = nueva CuentaPremium(5000, 500)
+miCuenta.ver_balance()
+print("Cuentas totales: ", Cuenta.contador_cuentas)

@@ -1,0 +1,15 @@
+# Prueba de Tail Call Optimization (TCO)
+# Sin TCO, una recursion de 10k causaria desbordamiento de pila.
+
+funcion contar(n) {
+    si (n <= 0) {
+        print("¡Cuenta terminada!");
+        retornar nulo;
+    }
+    si (n % 1000 == 0) {
+        print("Progreso: ", n);
+    }
+    retornar contar(n - 1); # Llamada en posicion de cola
+}
+
+contar(10000);

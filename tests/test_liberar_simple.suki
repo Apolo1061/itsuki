@@ -1,0 +1,17 @@
+# Test simple de liberar
+print("Test 1: Liberar array vacío")
+sea arr1 = []
+liberar(arr1)
+print("✓ Array vacío liberado")
+
+print("\nTest 2: Liberar array con números")
+sea arr2 = [1, 2, 3]
+liberar(arr2)
+print("✓ Array con números liberado")
+
+print("\nTest 3: Liberar string")
+sea s = "test"
+liberar(s)
+print("✓ String liberado")
+
+print("\n=== Todos los tests pasaron ===")

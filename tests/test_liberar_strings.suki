@@ -1,0 +1,13 @@
+# Test con strings concatenados
+print("Test: Array con strings concatenados")
+
+sea arr = []
+para i en (0, 5) {
+    agregar(arr, "string " + string(i))
+}
+
+print("Array creado")
+liberar(arr)
+print("✓ Array liberado")
+
+print("=== Test completado ===")

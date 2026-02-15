@@ -1,0 +1,18 @@
+print("Test: Liberar array retornado de función")
+
+funcion crear_array() {
+    sea a = []
+    para k en (0, 10) {
+        agregar(a, "string " + string(k))
+    }
+    retornar a
+}
+
+para i en (0, 3) {
+    print("Iteración ", i)
+    sea obj = crear_array()
+    liberar(obj)
+    print("Liberado")
+}
+
+print("=== Test completado ===")

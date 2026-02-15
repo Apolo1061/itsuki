@@ -1,0 +1,9 @@
+print("123 es int: ", 123 es int)
+print("\"abc\" es string: ", "abc" es string)
+# En Itsuki 1 es verdadero, 0 es falso
+print("1 es bool: ", 1 es bool)
+print("[] es array: ", [] es array)
+print("{} es mapa: ", {} es mapa)
+
+print("123 es string: ", 123 es string)
+print("\"abc\" es int: ", "abc" es int)

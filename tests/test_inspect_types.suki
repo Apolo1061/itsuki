@@ -1,0 +1,3 @@
+print("string: ", string)
+print("int: ", int)
+print("input: ", input)

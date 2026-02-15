@@ -1,0 +1,7 @@
+funcion foo() {
+    print("Inicio")
+    retornar 1
+    print("Inalcanzable")
+}
+
+foo()

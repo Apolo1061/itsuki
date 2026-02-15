@@ -1,0 +1,2 @@
+sea x = input();
+print("Leido: ", x);
