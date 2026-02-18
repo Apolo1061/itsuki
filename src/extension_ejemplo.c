@@ -4,7 +4,7 @@ Result builtin_hola_c(Result args[], int n_args) {
     printf("¡Hola desde el mundo de C!\n");
     
     if (n_args > 0 && args[0].tipo == TIPO_CADENA) {
-        printf("Recibí: %s\n", args[0].s);
+        printf("Recibi: %s\n", args[0].s);
     }
 
     Result res = {0};
@@ -14,7 +14,7 @@ Result builtin_hola_c(Result args[], int n_args) {
 
 Result builtin_sumar_rapido(Result args[], int n_args) {
     if (n_args < 2) {
-        lanzar_error(ERROR_ARGUMENTO, "sumar_rapido() requiere 2 números");
+        lanzar_error(ERROR_ARGUMENTO, "sumar_rapido() requiere 2 numeros");
     }
     
     double a = args[0].n;

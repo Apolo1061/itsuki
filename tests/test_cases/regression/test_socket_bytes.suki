@@ -1,0 +1,42 @@
+importar "modules/socket" como net
+
+print("TEST socket bytes")
+
+sea srv = net.socket(net.AF_INET, net.SOCK_STREAM)
+net.set_reuseaddr(srv, 1)
+net.bind(srv, "127.0.0.1", 19003)
+net.listen(srv, 1)
+
+sea cli = net.socket(net.AF_INET, net.SOCK_STREAM)
+net.connect(cli, "127.0.0.1", 19003)
+
+sea res = net.accept(srv)
+sea c = res[0]
+
+sea payload = [0, 1, 2, 3, 255, 0, 128, 64]
+sea sent = net.send_all(cli, payload)
+si (sent != largo(payload)) {
+    print("FAIL")
+    salir(1)
+}
+
+sea got = net.recv_exact(c, largo(payload))
+si (largo(got) != largo(payload)) {
+    print("FAIL")
+    salir(1)
+}
+
+sea i = 0
+mientras (i < largo(payload)) {
+    si (got[i] != payload[i]) {
+        print("FAIL")
+        salir(1)
+    }
+    i = i + 1
+}
+
+print("PASS")
+
+net.close(c)
+net.close(cli)
+net.close(srv)

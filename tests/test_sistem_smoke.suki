@@ -1,0 +1,8 @@
+importar "modules/sistem" como os
+
+print("OS:", os.name())
+print("CWD:", os.cwd())
+sea files = os.listdir("modules")
+print("modules entries:", largo(files))
+sea rc = os.run("echo sistem-ok")
+print("run rc:", rc)

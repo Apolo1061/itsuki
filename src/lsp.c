@@ -3,11 +3,6 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include "itsuki.h"
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-
 void lsp_send(const char* content) {
     if (!content) return;
     printf("Content-Length: %d\r\n\r\n%s", (int)strlen(content), content);

@@ -12,7 +12,7 @@ void print_help() {
     printf("Itsuki Package Manager\n");
     printf("Uso: itsuki-cy <comando> [argumentos]\n\n");
     printf("Comandos:\n");
-    printf("  install <user / repo>  Instala un paquete desde GitHub\n");
+    printf("  install <user/repo>  Instala un paquete desde GitHub\n");
     printf("  remove <repo>        Elimina un paquete del directorio modules/\n");
     printf("  update <repo | all>    Actualiza un paquete o todos los instalados\n");
     printf("  list                 Lista los paquetes instalados\n");
@@ -28,7 +28,7 @@ int main(int argc, char* argv[]) {
 
     if (strcmp(command, "list") == 0) {
         printf("Listando paquetes en modules/...\n");
-        system("dir modules /B");
+        int r = system("dir modules /B"); (void)r;
     } else if (strcmp(command, "remove") == 0) {
         if (argc < 3) {
             printf("Error: remove requiere el nombre del paquete\n");
@@ -41,7 +41,7 @@ int main(int argc, char* argv[]) {
         sprintf(cmd, "rm -rf modules/%s", argv[2]);
 #endif
         printf("Eliminando paquete: %s\n", argv[2]);
-        system(cmd);
+        int r = system(cmd); (void)r;
     } else if (strcmp(command, "update") == 0) {
         if (argc < 3) {
             printf("Error: update requiere el nombre del paquete o 'all'\n");
@@ -60,14 +60,14 @@ int main(int argc, char* argv[]) {
                             char cmd[512];
                             sprintf(cmd, "cd modules\\%s && git pull", fd.cFileName);
                             printf("\n--- Actualizando: %s ---\n", fd.cFileName);
-                            system(cmd);
+                            int r = system(cmd); (void)r;
                         }
                     }
                 } while (FindNextFile(h, &fd));
                 FindClose(h);
             }
 #else
-            system("for dir in modules/*; do if [ -d \"$dir\" ]; then echo \"\n--- Actualizando: ${dir#modules/} ---\"; (cd \"$dir\" && git pull); fi; done");
+            int r = system("for dir in modules/*; do if [ -d \"$dir\" ]; then echo \"\n--- Actualizando: ${dir#modules/} ---\"; (cd \"$dir\" && git pull); fi; done"); (void)r;
 #endif
         } else {
             char cmd[512];
@@ -77,7 +77,7 @@ int main(int argc, char* argv[]) {
             sprintf(cmd, "cd modules/%s && git pull", argv[2]);
 #endif
             printf("Actualizando paquete: %s\n", argv[2]);
-            system(cmd);
+            int r = system(cmd); (void)r;
         }
     } else {
         printf("Comando desconocido: %s\n", command);

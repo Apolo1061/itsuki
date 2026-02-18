@@ -5,7 +5,7 @@ void imprimir_perfil() {
     printf("\n--- REPORTE DE PERFILADO ---\n");
     printf("%-30s | %-12s | %-10s\n", "Funcion", "Tiempo (s)", "Llamadas");
     printf("-------------------------------|--------------|-----------\n");
-    
+
     for (int i=0; i<n_perfil-1; i++) {
         for (int j=0; j<n_perfil-i-1; j++) {
             if (perfil_datos[j].tiempo_total < perfil_datos[j+1].tiempo_total) {
@@ -15,34 +15,34 @@ void imprimir_perfil() {
             }
         }
     }
-    
+
     for (int i=0; i<n_perfil; i++) {
-        printf("%-30s | %-12.6f | %-10ld\n", 
-            perfil_datos[i].nombre_func, 
-            perfil_datos[i].tiempo_total, 
+        printf("%-30s | %-12.6f | %-10ld\n",
+            perfil_datos[i].nombre_func,
+            perfil_datos[i].tiempo_total,
             perfil_datos[i].llamadas);
     }
     printf("----------------------------------------------------------\n");
 }
 
-#ifndef ITSUKI_BUNDLED
-bool es_funcion_nativa_proxy(const char* nombre) { return false; }
-Result ejecutar_nativa_proxy(const char* nombre, Result args[], int n_args) {
-    return (Result){.tipo = TIPO_NULO};
-}
-#endif
-
 #ifndef ITS_EMBED
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <io.h>
+#define ITS_ISATTY _isatty
+#define ITS_FILENO _fileno
+#else
+#include <unistd.h>
+#define ITS_ISATTY isatty
+#define ITS_FILENO fileno
+#endif
 
 typedef struct {
     char* path;
     char* content;
 } BundledFile;
-
-struct Array* cli_args = NULL;
 
 BundledFile bundled_files[256];
 int n_bundled = 0;
@@ -103,26 +103,26 @@ void add_c_include(const char* h) {
 void collect_dependencies(const char* path) {
     char clean_path[256]; strcpy(clean_path, path);
     if (ya_visitado(clean_path)) return;
-    
+
     char* content = leer_archivo_texto(clean_path);
     if (!content) {
         printf("Advertencia: No se pudo leer modulo '%s' para bundling.\n", clean_path);
         return;
     }
-    
+
     visited_paths[n_visited++] = my_strdup(clean_path);
     bundled_files[n_bundled].path = my_strdup(clean_path);
-    bundled_files[n_bundled].content = content; 
+    bundled_files[n_bundled].content = content;
     n_bundled++;
-    
+
     TokenStream* ts_local = tokenize_all(content);
     if (!ts_local) return;
-    
+
     int current = 0;
     Token local_tk;
     #define LOCAL_ADV() (local_tk = ts_local->tokens[current++])
     #define LOCAL_PEEK() (ts_local->tokens[current])
-    
+
     LOCAL_ADV();
     while (local_tk.tipo != TOKEN_EOF) {
         if (local_tk.tipo == TOKEN_IMPORTAR || local_tk.tipo == TOKEN_DESDE) {
@@ -142,12 +142,12 @@ void collect_dependencies(const char* path) {
                 CExtern* ext = &c_externs[n_c_externs++];
                 strcpy(ext->name, local_tk.valor);
                 ext->n_params = 0;
-                
+
                 LOCAL_ADV();
                 if(local_tk.tipo == TOKEN_PAR_IZQ) {
                     LOCAL_ADV();
                     while(local_tk.tipo != TOKEN_PAR_DER && local_tk.tipo != TOKEN_EOF) {
-                        LOCAL_ADV(); 
+                        LOCAL_ADV();
                         if(local_tk.tipo == TOKEN_DOS_PUNTOS) {
                             LOCAL_ADV();
                            if(local_tk.tipo == TOKEN_IDENTIFICADOR || local_tk.tipo == TOKEN_CADENA) {
@@ -161,7 +161,7 @@ void collect_dependencies(const char* path) {
                         if(local_tk.tipo == TOKEN_COMA) LOCAL_ADV();
                     }
                 }
-                
+
                 strcpy(ext->ret_type, "void");
                 LOCAL_ADV();
                 if(local_tk.tipo == TOKEN_DOS_PUNTOS) {
@@ -172,13 +172,13 @@ void collect_dependencies(const char* path) {
         }
         LOCAL_ADV();
     }
-    
+
     free_token_stream(ts_local);
 }
 
 int main(int argc, char** argv) {
     if (argc >= 2 && (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help"))) {
-        printf("Itsuki Scripting Engine v4.5\n");
+        printf("Itsuki Scripting Engine v%s\n", ITSUKI_VERSION);
         printf("Uso:\n");
         printf("  itsuki <script.suki>          Ejecuta un script\n");
         printf("  itsuki <binario.sukiby>       Ejecuta bytecode\n");
@@ -187,6 +187,18 @@ int main(int argc, char** argv) {
         printf("  itsuki <script.suki> -b <out> Compila a bytecode (.sukiby)\n");
         printf("  itsuki --lsp                  Inicia el servidor de lenguaje (LSP)\n");
         printf("  itsuki                        Inicia el modo REPL\n");
+        printf("\nOpciones:\n");
+        printf("  --jit                         Habilita JIT simple (x86_64)\n");
+        printf("  --jit-hot <N>                 Umbral de llamadas antes de compilar JIT\n");
+        printf("  --gc                          Fuerza GC habilitado\n");
+        printf("  --no-gc                       Fuerza GC deshabilitado\n");
+        printf("  --version                     Muestra version\n");
+        printf("\nNota: Si no se especifica --gc/--no-gc, se usa modo automatico (GC habilitado en terminal interactiva).\n");
+        return 0;
+    }
+
+    if (argc >= 2 && (!strcmp(argv[1], "-v") || !strcmp(argv[1], "--version"))) {
+        printf("%s\n", ITSUKI_VERSION);
         return 0;
     }
 
@@ -196,18 +208,18 @@ int main(int argc, char** argv) {
     }
 
     if (argc < 2) {
-        printf("Itsuki REPL v4.5\n");
+        printf("Itsuki REPL v%s\n", ITSUKI_VERSION);
         printf("Escribe ':ayuda' para ver comandos o ':salir' para terminar.\n");
         itsuki_init();
         repl_mode = true;
-        
+
         char buffer[1024];
         while(1) {
             printf("itsuki> ");
             if(!fgets(buffer, 1024, stdin)) break;
-            
+
             buffer[strcspn(buffer, "\n")] = 0;
-            
+
             if(!strcmp(buffer, ":salir") || !strcmp(buffer, ":exit")) break;
             if(!strcmp(buffer, ":ayuda")) {
                 printf("Comandos:\n  :salir    Salir del REPL\n  :ayuda    Mostrar esta ayuda\n  :limpiar  Limpiar pantalla\n");
@@ -218,11 +230,11 @@ int main(int argc, char** argv) {
                 (void)res;
                 continue;
             }
-            
+
             if(strlen(buffer) == 0) continue;
-            
+
             strcpy(ultima_linea_repl, buffer);
-            
+
             if(setjmp(error_jmp) == 0) {
                 itsuki_execute(buffer);
             } else {
@@ -234,11 +246,11 @@ int main(int argc, char** argv) {
     if (argc >= 4 && (!strcmp(argv[2], "-o") || !strcmp(argv[2], "-c") || !strcmp(argv[2], "-b"))) {
         bool only_c = !strcmp(argv[2], "-c");
         bool compile_bc = !strcmp(argv[2], "-b");
-        
+
         bool static_link = false;
         bool strip_bin = false;
         bool keep_temp = false;
-        
+
         for(int i=4; i<argc; i++) {
             if(!strcmp(argv[i], "--static")) static_link = true;
             if(!strcmp(argv[i], "--strip")) strip_bin = true;
@@ -251,17 +263,17 @@ int main(int argc, char** argv) {
         if (compile_bc && !strstr(final_out, ".sukiby")) {
             strcat(final_out, ".sukiby");
         }
-        
+
         char* out_name = final_out;
-        
+
         if (only_c) printf("Generando codigo C para %s -> %s...\n", argv[1], out_name);
         else if (compile_bc) printf("Compilando Bytecode %s -> %s...\n", argv[1], out_name);
-        else printf("Compilando Itsuki v4.5 %s -> %s.exe...\n", argv[1], out_name);
+        else printf("Compilando Itsuki v%s %s -> %s.exe...\n", ITSUKI_VERSION, argv[1], out_name);
 
         collect_dependencies(argv[1]);
-        
+
         FILE* out_c = fopen(only_c ? out_name : "bundle.c", "w");
-        
+
         fprintf(out_c, "#define ITS_EMBED \"");
         char* script = bundled_files[0].content;
         for(int i=0; script[i]; i++) {
@@ -291,19 +303,20 @@ int main(int argc, char** argv) {
             fprintf(out_c, "\"},\n");
         }
         fprintf(out_c, "    {.path = 0, .content = 0}\n};\n");
-        
+
         fprintf(out_c, "#include \"src/utils.c\"\n");
         fprintf(out_c, "#include \"src/lexer.c\"\n");
         fprintf(out_c, "#include \"src/gc.c\"\n");
         fprintf(out_c, "#include \"src/parser.c\"\n");
         fprintf(out_c, "#include \"src/evaluator.c\"\n");
-        fprintf(out_c, "#include \"src/compiler.c\"\n"); 
-        fprintf(out_c, "#include \"src/vm.c\"\n");       
-        fprintf(out_c, "#include \"src/bytecode.c\"\n"); 
+        fprintf(out_c, "#include \"src/compiler.c\"\n");
+        fprintf(out_c, "#include \"src/vm.c\"\n");
+        fprintf(out_c, "#include \"src/jit.c\"\n");
+        fprintf(out_c, "#include \"src/bytecode.c\"\n");
         fprintf(out_c, "#include \"src/builtins.c\"\n");
         fprintf(out_c, "#include \"src/socket.c\"\n");
         fprintf(out_c, "#include \"src/lsp.c\"\n");
-        
+
         for(int i=0; i<n_c_includes; i++) {
             fprintf(out_c, "#include %s\n", c_includes[i].header);
         }
@@ -312,11 +325,11 @@ int main(int argc, char** argv) {
             CExtern* ext = &c_externs[i];
             fprintf(out_c, "Result glue_%s(Result args[], int n_args) {\n", ext->name);
             fprintf(out_c, "    if (n_args < %d) return (Result){.tipo = TIPO_NULO};\n", ext->n_params);
-            
+
             bool returns_void = !strcmp(ext->ret_type, "void");
             if (!returns_void) fprintf(out_c, "    %s res_top = ", ext->ret_type);
             else fprintf(out_c, "    ");
-            
+
             fprintf(out_c, "%s(", ext->name);
             for(int j=0; j<ext->n_params; j++) {
                 if(!strcmp(ext->param_types[j], "int")) fprintf(out_c, "(int)args[%d].n", j);
@@ -324,11 +337,11 @@ int main(int argc, char** argv) {
                 else if(!strcmp(ext->param_types[j], "string") || !strcmp(ext->param_types[j], "char*")) fprintf(out_c, "args[%d].s ? args[%d].s : \"\"", j, j);
                 else if(!strcmp(ext->param_types[j], "bool")) fprintf(out_c, "args[%d].n ? 1 : 0", j);
                 else fprintf(out_c, "(int)args[%d].n", j);
-                
+
                 if(j < ext->n_params - 1) fprintf(out_c, ", ");
             }
             fprintf(out_c, ");\n");
-            
+
             if (returns_void) {
                 fprintf(out_c, "    return (Result){.tipo = TIPO_NULO};\n");
             } else {
@@ -340,13 +353,13 @@ int main(int argc, char** argv) {
             }
             fprintf(out_c, "}\n");
         }
-        
+
         fprintf(out_c, "bool es_funcion_nativa_proxy(const char* nombre) {\n");
         for(int i=0; i<n_c_externs; i++) {
             fprintf(out_c, "    if(!strcmp(nombre, \"%s\")) return true;\n", c_externs[i].name);
         }
         fprintf(out_c, "    return false;\n}\n");
-        
+
         fprintf(out_c, "Result ejecutar_nativa_proxy(const char* nombre, Result args[], int n_args) {\n");
         for(int i=0; i<n_c_externs; i++) {
             fprintf(out_c, "    if(!strcmp(nombre, \"%s\")) return glue_%s(args, n_args);\n", c_externs[i].name, c_externs[i].name);
@@ -357,6 +370,10 @@ int main(int argc, char** argv) {
         fprintf(out_c, "    int f_idx;\n");
         for(int i=0; i<n_c_externs; i++) {
             fprintf(out_c, "    f_idx = n_f++;\n");
+            fprintf(out_c, "    funcs[f_idx].jit_ptr = NULL;\n");
+            fprintf(out_c, "    funcs[f_idx].jit_size = 0;\n");
+            fprintf(out_c, "    funcs[f_idx].jit_calls = 0;\n");
+            fprintf(out_c, "    funcs[f_idx].jit_state = 0;\n");
             fprintf(out_c, "    strcpy(funcs[f_idx].nombre, \"%s\");\n", c_externs[i].name);
             fprintf(out_c, "    funcs[f_idx].n_params = %d;\n", c_externs[i].n_params);
             fprintf(out_c, "    funcs[f_idx].chunk_bytecode = NULL;\n");
@@ -368,17 +385,17 @@ int main(int argc, char** argv) {
         fprintf(out_c, "#define ITSUKI_FFI_BUNDLE\n");
         fprintf(out_c, "#include \"src/main.c\"\n");
         fprintf(out_c, "int main() { itsuki_init(); registrar_ffi(); itsuki_execute(ITS_EMBED); return 0; }\n");
-        
+
         fclose(out_c);
-        
+
         if (!only_c) {
-            char cmd[512]; 
+            char cmd[512];
             sprintf(cmd, "gcc bundle.c -I./src/headers -O3 -march=native %s %s -o %s -lm",
                 static_link ? "-static" : "",
                 strip_bin ? "-s" : "",
                 out_name
             );
-            
+
             if(system(cmd) == 0) {
                 printf("¡Exito! %s creado con optimizacion -O3 -march=native.\n", out_name);
                 if (!keep_temp) remove("bundle.c");
@@ -390,7 +407,7 @@ int main(int argc, char** argv) {
         }
         return 0;
     }
-    
+
     if (strstr(argv[1], ".sukic") || strstr(argv[1], ".sukiby")) {
     }
 
@@ -411,39 +428,56 @@ int main(int argc, char** argv) {
         FILE* f = fopen(argv[2], "rb");
         if (!f) { printf("Archivo no encontrado: %s\n", argv[2]); return 1; }
         fseek(f, 0, SEEK_END); long s = ftell(f); fseek(f, 0, SEEK_SET);
-        char* b = malloc(s + 1); 
+        char* b = malloc(s + 1);
         size_t nr_lint = fread(b, 1, s, f); b[nr_lint] = 0; fclose(f);
         itsuki_init();
-        itsuki_lint(b);
+        if (setjmp(error_jmp) == 0) {
+            itsuki_lint(b);
+        } else {
+            free(b);
+            return 1;
+        }
         free(b);
         return 0;
     }
 
     FILE* f = fopen(argv[1], "rb"); if(!f) { printf("Archivo no encontrado: %s\n", argv[1]); return 1; }
     fseek(f, 0, SEEK_END); long s = ftell(f); fseek(f, 0, SEEK_SET);
-    char* b = malloc(s + 1); 
+    char* b = malloc(s + 1);
     size_t nr_main = fread(b, 1, s, f); b[nr_main] = 0; fclose(f);
-    
+
     itsuki_init();
     bool do_lint = false;
+    bool gc_flag_set = false;
     for (int i=2; i<argc; i++) {
         if (!strcmp(argv[i], "--debug")) { vm.debug_mode = true; vm.step_mode = true; }
         if (!strcmp(argv[i], "--profile")) vm.profiling_mode = true;
-        if (!strcmp(argv[i], "--no-gc")) { vm.manual_memory_mode = true; }
+        if (!strcmp(argv[i], "--gc")) { vm.manual_memory_mode = false; gc_flag_set = true; }
+        if (!strcmp(argv[i], "--no-gc")) { vm.manual_memory_mode = true; gc_flag_set = true; }
         if (!strcmp(argv[i], "--lint")) do_lint = true;
+        if (!strcmp(argv[i], "--jit")) vm.jit_enabled = true;
+        if (!strcmp(argv[i], "--jit-hot") && i + 1 < argc) { vm.jit_hot_threshold = atoi(argv[++i]); }
     }
-    
-    cli_args = array_crear(argc - 2 > 0 ? argc - 2 : 0);
+
+    if (!gc_flag_set) {
+        vm.manual_memory_mode = !ITS_ISATTY(ITS_FILENO(stdout));
+    }
+
+    vm.cli_args = array_crear(argc - 2 > 0 ? argc - 2 : 0);
     for (int i=2; i<argc; i++) {
-        array_agregar(cli_args, gc_new_string(argv[i]));
+        array_agregar(vm.cli_args, gc_new_string(argv[i]));
     }
-    
+
     if (do_lint) {
         itsuki_lint(b);
         return 0;
     }
-    
-    itsuki_execute(b);
+
+    if (setjmp(error_jmp) == 0) {
+        itsuki_execute(b);
+    } else {
+        return 1;
+    }
     if (vm.profiling_mode) imprimir_perfil();
     return 0;
 }

@@ -12,6 +12,10 @@ Result result_to_string_gc(Result r) {
     if(r.tipo == TIPO_BOOL) return gc_new_string(r.n ? "verdadero" : "falso");
     if(r.tipo == TIPO_ARRAY) return gc_new_string("[Array]");
     if(r.tipo == TIPO_MAP) return gc_new_string("{Map}");
+    if(r.tipo == TIPO_SOCKET) {
+        sprintf(buffer, "[Socket:%d]", (int)((ObjSocket*)r.obj)->handle);
+        return gc_new_string(buffer);
+    }
     return gc_new_string("");
 }
 
@@ -28,6 +32,7 @@ Result builtin_tipo_de(Result args[], int n_args) {
         else if(c.tipo == TIPO_MAP) return gc_new_string("mapa");
         else if(c.tipo == TIPO_BOOL) return gc_new_string("booleano");
         else if(c.tipo == TIPO_INSTANCIA) return gc_new_string("instancia");
+        else if(c.tipo == TIPO_SOCKET) return gc_new_string("socket");
         else return gc_new_string("nulo");
     }
 }
@@ -165,14 +170,12 @@ Result builtin_system(Result args[], int n_args) {
     return (Result){.n = (double)ret, .tipo = TIPO_NUMERO};
 }
 
-extern struct Array* cli_args; // Defined in main.c
-
 Result builtin_args(Result args[], int n_args) {
-    if (!cli_args) return gc_new_array(); // Should be initialized in main
+    if (!vm.cli_args) return gc_new_array(); // Should be initialized by CLI
     Result r;
     r.tipo = TIPO_ARRAY;
-    r.a = cli_args;
-    r.obj = (Obj*)cli_args;
+    r.a = vm.cli_args;
+    r.obj = (Obj*)vm.cli_args;
     return r;
 }
 
@@ -335,7 +338,7 @@ Result builtin_repetir(Result args[], int n_args) {
     for(int i = 0; i < veces && i < 100; i++) {
         strcat(buffer, args[0].s);
     }
-    return (Result){.s = my_strdup(buffer), .tipo = TIPO_CADENA};
+    return gc_new_string(buffer);
 }
 
 Result builtin_agregar(Result args[], int n_args) {
@@ -562,19 +565,19 @@ Result builtin_reducir(Result args[], int n_args) {
     return acumulador;
 }
 
-extern bool es_funcion_nativa_proxy(const char* nombre);
-extern Result ejecutar_nativa_proxy(const char* nombre, Result args[], int n_args);
-
 bool es_funcion_builtin(const char* nombre) {
+    if (!nombre) return false;
     if (es_funcion_nativa_proxy(nombre)) return true;
+    if (strncmp(nombre, "socket_", 7) == 0 || strncmp(nombre, "_socket_", 8) == 0) return true;
+    if (strncmp(nombre, "time_", 5) == 0 || strncmp(nombre, "_time_", 6) == 0) return true;
     
     if(!strcmp(nombre, "tipo_de")) return true;
     if(!strcmp(nombre, "string")) return true;
+    if(!strcmp(nombre, "largo")) return true;
     if(!strcmp(nombre, "int")) return true;
     if(!strcmp(nombre, "input")) return true;
     if(!strcmp(nombre, "decimal")) return true;
-    if(!strcmp(nombre, "booleano")) return true;
-    if(!strcmp(nombre, "bool")) return true;
+    if(!strcmp(nombre, "booleano") || !strcmp(nombre, "bool")) return true;
     if(!strcmp(nombre, "mayusculas")) return true;
     if(!strcmp(nombre, "minusculas")) return true;
     if(!strcmp(nombre, "subcadena")) return true;
@@ -616,6 +619,7 @@ bool es_funcion_builtin(const char* nombre) {
     if(!strcmp(nombre, "system")) return true;
     if(!strcmp(nombre, "cli_args")) return true;
     if(!strcmp(nombre, "platform")) return true;
+
     return false;
 }
 
@@ -688,17 +692,47 @@ Result ejecutar_builtin(const char* nombre, Result args[], int n_args) {
     if(!strcmp(nombre, "array")) return builtin_array(args, n_args);
     if(!strcmp(nombre, "mapa")) return builtin_mapa(args, n_args);
 
-    // Socket native functions (prefixed with _)
-    if(!strcmp(nombre, "_socket_socket")) return builtin_socket_socket(args, n_args);
-    if(!strcmp(nombre, "_socket_bind")) return builtin_socket_bind(args, n_args);
-    if(!strcmp(nombre, "_socket_listen")) return builtin_socket_listen(args, n_args);
-    if(!strcmp(nombre, "_socket_accept")) return builtin_socket_accept(args, n_args);
-    if(!strcmp(nombre, "_socket_connect")) return builtin_socket_connect(args, n_args);
-    if(!strcmp(nombre, "_socket_send")) return builtin_socket_send(args, n_args);
-    if(!strcmp(nombre, "_socket_recv")) return builtin_socket_recv(args, n_args);
-    if(!strcmp(nombre, "_socket_sendto")) return builtin_socket_sendto(args, n_args);
-    if(!strcmp(nombre, "_socket_recvfrom")) return builtin_socket_recvfrom(args, n_args);
-    if(!strcmp(nombre, "_socket_close")) return builtin_socket_close(args, n_args);
+    if(!strcmp(nombre, "socket_socket") || !strcmp(nombre, "_socket_socket")) return builtin_socket_socket(args, n_args);
+    if(!strcmp(nombre, "socket_bind") || !strcmp(nombre, "_socket_bind")) return builtin_socket_bind(args, n_args);
+    if(!strcmp(nombre, "socket_listen") || !strcmp(nombre, "_socket_listen")) return builtin_socket_listen(args, n_args);
+    if(!strcmp(nombre, "socket_accept") || !strcmp(nombre, "_socket_accept")) return builtin_socket_accept(args, n_args);
+    if(!strcmp(nombre, "socket_connect") || !strcmp(nombre, "_socket_connect")) return builtin_socket_connect(args, n_args);
+    if(!strcmp(nombre, "socket_send") || !strcmp(nombre, "_socket_send")) return builtin_socket_send(args, n_args);
+    if(!strcmp(nombre, "socket_send_bytes") || !strcmp(nombre, "_socket_send_bytes")) return builtin_socket_send_bytes(args, n_args);
+    if(!strcmp(nombre, "socket_send_all_bytes") || !strcmp(nombre, "_socket_send_all_bytes")) return builtin_socket_send_all_bytes(args, n_args);
+    if(!strcmp(nombre, "socket_recv") || !strcmp(nombre, "_socket_recv")) return builtin_socket_recv(args, n_args);
+    if(!strcmp(nombre, "socket_recv_bytes") || !strcmp(nombre, "_socket_recv_bytes")) return builtin_socket_recv_bytes(args, n_args);
+    if(!strcmp(nombre, "socket_recv_exact_bytes") || !strcmp(nombre, "_socket_recv_exact_bytes")) return builtin_socket_recv_exact_bytes(args, n_args);
+    if(!strcmp(nombre, "socket_recv_until_bytes") || !strcmp(nombre, "_socket_recv_until_bytes")) return builtin_socket_recv_until_bytes(args, n_args);
+    if(!strcmp(nombre, "socket_sendto") || !strcmp(nombre, "_socket_sendto")) return builtin_socket_sendto(args, n_args);
+    if(!strcmp(nombre, "socket_sendto_bytes") || !strcmp(nombre, "_socket_sendto_bytes")) return builtin_socket_sendto_bytes(args, n_args);
+    if(!strcmp(nombre, "socket_sendto_raw") || !strcmp(nombre, "_socket_sendto_raw")) return builtin_socket_sendto_raw(args, n_args);
+    if(!strcmp(nombre, "socket_set_hdrincl") || !strcmp(nombre, "_socket_set_hdrincl")) return builtin_socket_set_hdrincl(args, n_args);
+    if(!strcmp(nombre, "socket_setsockopt") || !strcmp(nombre, "_socket_setsockopt")) return builtin_socket_setsockopt(args, n_args);
+    if(!strcmp(nombre, "socket_getsockopt") || !strcmp(nombre, "_socket_getsockopt")) return builtin_socket_getsockopt(args, n_args);
+    if(!strcmp(nombre, "socket_set_timeout") || !strcmp(nombre, "_socket_set_timeout")) return builtin_socket_set_timeout(args, n_args);
+    if(!strcmp(nombre, "socket_shutdown") || !strcmp(nombre, "_socket_shutdown")) return builtin_socket_shutdown(args, n_args);
+    if(!strcmp(nombre, "socket_recvfrom") || !strcmp(nombre, "_socket_recvfrom")) return builtin_socket_recvfrom(args, n_args);
+    if(!strcmp(nombre, "socket_recvfrom_bytes") || !strcmp(nombre, "_socket_recvfrom_bytes")) return builtin_socket_recvfrom_bytes(args, n_args);
+    if(!strcmp(nombre, "socket_close") || !strcmp(nombre, "_socket_close")) return builtin_socket_close(args, n_args);
+    if(!strcmp(nombre, "socket_set_nonblocking") || !strcmp(nombre, "_socket_set_nonblocking")) return builtin_socket_set_nonblocking(args, n_args);
+    if(!strcmp(nombre, "socket_select") || !strcmp(nombre, "_socket_select")) return builtin_socket_select(args, n_args);
+    if(!strcmp(nombre, "socket_getsockname") || !strcmp(nombre, "_socket_getsockname")) return builtin_socket_getsockname(args, n_args);
+    if(!strcmp(nombre, "socket_getpeername") || !strcmp(nombre, "_socket_getpeername")) return builtin_socket_getpeername(args, n_args);
+    if(!strcmp(nombre, "socket_set_reuseaddr") || !strcmp(nombre, "_socket_set_reuseaddr")) return builtin_socket_set_reuseaddr(args, n_args);
+    if(!strcmp(nombre, "socket_set_keepalive") || !strcmp(nombre, "_socket_set_keepalive")) return builtin_socket_set_keepalive(args, n_args);
+    if(!strcmp(nombre, "socket_set_nodelay") || !strcmp(nombre, "_socket_set_nodelay")) return builtin_socket_set_nodelay(args, n_args);
+    if(!strcmp(nombre, "socket_set_broadcast") || !strcmp(nombre, "_socket_set_broadcast")) return builtin_socket_set_broadcast(args, n_args);
+    if(!strcmp(nombre, "socket_multicast_join") || !strcmp(nombre, "_socket_multicast_join")) return builtin_socket_multicast_join(args, n_args);
+    if(!strcmp(nombre, "socket_multicast_leave") || !strcmp(nombre, "_socket_multicast_leave")) return builtin_socket_multicast_leave(args, n_args);
+    if(!strcmp(nombre, "socket_last_error") || !strcmp(nombre, "_socket_last_error")) return builtin_socket_last_error(args, n_args);
+
+    if(!strcmp(nombre, "time_now_ms") || !strcmp(nombre, "_time_now_ms")) return builtin_time_now_ms(args, n_args);
+    if(!strcmp(nombre, "time_monotonic_ms") || !strcmp(nombre, "_time_monotonic_ms")) return builtin_time_monotonic_ms(args, n_args);
+    if(!strcmp(nombre, "time_sleep_ms") || !strcmp(nombre, "_time_sleep_ms")) return builtin_time_sleep_ms(args, n_args);
+    if(!strcmp(nombre, "time_format_utc_ms") || !strcmp(nombre, "_time_format_utc_ms")) return builtin_time_format_utc_ms(args, n_args);
+    if(!strcmp(nombre, "time_format_local_ms") || !strcmp(nombre, "_time_format_local_ms")) return builtin_time_format_local_ms(args, n_args);
+
     if(!strcmp(nombre, "liberar")) return builtin_liberar(args, n_args);
     
     Result r = {0};
@@ -718,15 +752,38 @@ void registrar_builtins() {
         "dormir", "salir", "leer_archivo", "escribir_archivo", "existe_archivo",
         "liberar", "conseguir_mem", "array", "mapa",
         "system", "cli_args", "platform",
+        "socket_socket", "socket_bind", "socket_listen", "socket_accept", 
+        "socket_connect", "socket_send", "socket_send_bytes", "socket_send_all_bytes", "socket_recv",
+        "socket_recv_bytes", "socket_recv_exact_bytes", "socket_recv_until_bytes", "socket_close",
+        "socket_sendto", "socket_sendto_bytes", "socket_sendto_raw", "socket_set_hdrincl",
+        "socket_setsockopt", "socket_getsockopt", "socket_set_timeout",
+        "socket_shutdown", "socket_recvfrom", "socket_recvfrom_bytes",
+        "socket_set_nonblocking", "socket_select", "socket_getsockname", "socket_getpeername",
+        "socket_set_reuseaddr", "socket_set_keepalive", "socket_set_nodelay", "socket_set_broadcast",
+        "socket_multicast_join", "socket_multicast_leave", "socket_last_error",
         "_socket_socket", "_socket_bind", "_socket_listen", "_socket_accept", 
-        "_socket_connect", "_socket_send", "_socket_recv", "_socket_close",
-        "_socket_sendto", "_socket_recvfrom"
+        "_socket_connect", "_socket_send", "_socket_send_bytes", "_socket_send_all_bytes", "_socket_recv",
+        "_socket_recv_bytes", "_socket_recv_exact_bytes", "_socket_recv_until_bytes", "_socket_close",
+        "_socket_sendto", "_socket_sendto_bytes", "_socket_sendto_raw", "_socket_set_hdrincl",
+        "_socket_setsockopt", "_socket_getsockopt", "_socket_set_timeout",
+        "_socket_shutdown",
+        "_socket_recvfrom", "_socket_recvfrom_bytes",
+        "_socket_set_nonblocking", "_socket_select", "_socket_getsockname", "_socket_getpeername",
+        "_socket_set_reuseaddr", "_socket_set_keepalive", "_socket_set_nodelay", "_socket_set_broadcast",
+        "_socket_multicast_join", "_socket_multicast_leave", "_socket_last_error"
+        ,
+        "time_now_ms", "time_monotonic_ms", "time_sleep_ms", "time_format_utc_ms", "time_format_local_ms",
+        "_time_now_ms", "_time_monotonic_ms", "_time_sleep_ms", "_time_format_utc_ms", "_time_format_local_ms"
     };
     int total = sizeof(nombres) / sizeof(nombres[0]);
     for (int i = 0; i < total; i++) {
         int f_idx = n_f++;
+        funcs[f_idx].jit_ptr = NULL;
+        funcs[f_idx].jit_size = 0;
+        funcs[f_idx].jit_calls = 0;
+        funcs[f_idx].jit_state = 0;
         strcpy(funcs[f_idx].nombre, nombres[i]);
-        funcs[f_idx].n_params = 0; // Built-ins manejan sus propios args
+        funcs[f_idx].n_params = 0;
         funcs[f_idx].chunk_bytecode = NULL;
         funcs[f_idx].cuerpo_ast = NULL;
         hash_insert(&ht_funcs, nombres[i], f_idx);

@@ -18,6 +18,10 @@ void* gc_alloc(size_t size, ObjType type) {
     }
 
     struct Obj* obj = (struct Obj*)malloc(size);
+    if (!obj) {
+        fprintf(stderr, "Out of memory (gc_alloc %lu bytes)\n", (unsigned long)size);
+        exit(1);
+    }
     obj->type = type;
     obj->is_marked = false;
     obj->is_freed = false;
@@ -29,8 +33,31 @@ void* gc_alloc(size_t size, ObjType type) {
 
 static void marcar_objeto(struct Obj* obj);
 
+static bool valor_tiene_obj(Result r) {
+    switch (r.tipo) {
+        case TIPO_CADENA:
+        case TIPO_ARRAY:
+        case TIPO_MAP:
+        case TIPO_INSTANCIA:
+        case TIPO_CLAUSURA:
+        case TIPO_ENUM:
+        case TIPO_MODULO:
+        case TIPO_SOCKET:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool obj_en_lista(struct Obj* obj) {
+    for (struct Obj* cur = lista_objetos; cur; cur = cur->next) {
+        if (cur == obj) return true;
+    }
+    return false;
+}
+
 static void marcar_valor(Result r) {
-    if (r.obj) {
+    if (valor_tiene_obj(r) && r.obj && obj_en_lista(r.obj)) {
         marcar_objeto(r.obj);
     }
 }
@@ -106,8 +133,31 @@ void gc_marcar() {
     }
 
     for (int i = 0; i < n_v; i++) {
-        if (vars[i].obj) {
-            marcar_objeto(vars[i].obj);
+        Result r = {0};
+        r.tipo = vars[i].tipo;
+        r.obj = vars[i].obj;
+        if (valor_tiene_obj(r) && r.obj && obj_en_lista(r.obj)) {
+            marcar_objeto(r.obj);
+        }
+    }
+
+    if (vm.chunk && vm.chunk->constantes) {
+        for (int i = 0; i < vm.chunk->contador_constantes; i++) {
+            marcar_valor(vm.chunk->constantes[i]);
+        }
+    }
+
+    if (vm.modulos_cargados) marcar_objeto((Obj*)vm.modulos_cargados);
+    if (vm.clausura_actual) marcar_objeto((Obj*)vm.clausura_actual);
+    marcar_valor(vm.iterator_state.iterable);
+    if (vm.hay_error_pendiente) marcar_valor(vm.error_pendiente);
+    if (vm.cli_args) marcar_objeto((Obj*)vm.cli_args);
+    marcar_valor(last_res);
+
+    for (int i = 0; i < n_clases; i++) {
+        if (!clases[i].valores_estaticos) continue;
+        for (int j = 0; j < clases[i].n_estaticos; j++) {
+            marcar_valor(clases[i].valores_estaticos[j]);
         }
     }
 }
@@ -118,6 +168,7 @@ void liberar_objeto(struct Obj* obj) {
 
     switch (obj->type) {
         case OBJ_STRING:
+            free(((ObjString*)obj)->s);
             break;
         case OBJ_ARRAY:
             free(((Array*)obj)->elementos);
@@ -179,6 +230,7 @@ void liberar_objeto(struct Obj* obj) {
     }
 
     free(obj);
+    contador_objetos--;
 }
 
 void gc_limpiar() {
@@ -193,7 +245,7 @@ void gc_limpiar() {
             *obj = no_usado->next;
             
             switch (no_usado->type) {
-                case OBJ_STRING: break;
+                case OBJ_STRING: free(((ObjString*)no_usado)->s); break;
                 case OBJ_ARRAY: free(((Array*)no_usado)->elementos); break;
                 case OBJ_MAP: {
                      Map* m = (Map*)no_usado;
@@ -201,7 +253,6 @@ void gc_limpiar() {
                          MapEntry* e = m->buckets[i];
                          while(e) { MapEntry* n=e->next; free(e->clave); free(e); e=n; }
                      }
-                     free(m->buckets);
                      break;
                 }
                 case OBJ_INSTANCIA: free(((Instancia*)no_usado)->valores_propiedades); break;

@@ -11,7 +11,7 @@
 </p>
 
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg?style=for-the-badge)](LICENSE)
-![Version](https://img.shields.io/badge/version-4.5.3-green.svg?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-5.0-green.svg?style=for-the-badge)
 [![Discord](https://img.shields.io/discord/Xw2eaWvNsz?logo=discord&style=for-the-badge)](https://discord.gg/Xw2eaWvNsz)
 [![Stars](https://img.shields.io/github/stars/Apolo1061/itsuki?style=for-the-badge&logo=github)](https://github.com/Apolo1061/itsuki/stargazers)
 
@@ -107,6 +107,12 @@ make install
 </tr>
 </table>
 <br/>
+
+## Palabras clave en ingles
+
+Alias en ingles soportados (ademas de las palabras clave en espanol):
+
+`if` `else` `function` `return` `class` `new` `extends` `import` `export` `from` `as` `while` `for` `in` `break` `continue` `try` `catch` `finally` `throw` `public` `private` `static` `super` `enum` `case` `is` `lambda` `let` `var` `const` `true` `false` `null` `and` `or` `not` `print` `input`
 
 ## Estructura del Proyecto
 
@@ -401,13 +407,13 @@ make test
 gantt
     Plan de mejora para itsuki
     dateFormat:  YYYY-MM-DD
-    section v4.5
+    section v5.0
     Sistema de modulos mejorado:      2026-02-18,
     Mejor mensaje de errores:         2026-02-18,
-    section v4.6
+    section v5.1
     Optimizaciones del transpilador:  2026-02-27,
     Mejora del recolector de basura:  2026-03-25,
-    section v4.7
+    section v5.2
     Async/Await nativo            :2026-04-29,
     Mejoras de performance        :2026-05-05,
 ```

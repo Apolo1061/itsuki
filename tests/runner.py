@@ -43,6 +43,12 @@ class TestRunner:
     def discover_tests(self, test_dir: Path) -> List[Path]:
         """Descubre todos los archivos .suki en el directorio de tests"""
         tests = list(test_dir.glob("**/*.suki"))
+        extra_tests = [
+            Path("test_compare.suki"),
+        ]
+        for extra in extra_tests:
+            if extra.exists():
+                tests.append(extra)
         return sorted(list(set(tests)))
 
     def run_test(self, test_file: Path) -> TestResult:

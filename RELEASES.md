@@ -1,5 +1,18 @@
 # RELEASES
 
+## [v5.0] - 2026-02-17
+### Añadido
+- **Módulos nativos C**: soporte para cargar extensiones dinamicas con `importar "modules/xxx"` usando `.dll/.so/.dylib`.
+- **Módulo `math` nativo**: nuevo modulo de matematicas en C para operaciones numericas y estadísticas.
+- **Guía de módulos nativos**: nuevo documento `modulos_dm.md` con pasos para Windows y Linux.
+
+### Docs
+- **Web de documentación**: añadida sección dedicada a módulos nativos C con instrucciones de compilación por plataforma.
+
+## [v4.5] - 2026-02-16
+### Fix
+- **Sockets**: Corregido error de red.
+
 ## [v4.5] - 2026-02-15
 ### Añadido
 - **Subcomando `itsuki fmt`**: Formateador de codigo nativo con indentacion de 4 espacios.

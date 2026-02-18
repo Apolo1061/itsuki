@@ -4,17 +4,26 @@
 
 VM vm;
 
+#define PROP_CACHE_NONE 0
+#define PROP_CACHE_PROP 1
+#define PROP_CACHE_METHOD 2
+#define PROP_CACHE_STATIC 3
+
+#define INVOKE_CACHE_NONE 0
+#define INVOKE_CACHE_INSTANCE 1
+#define INVOKE_CACHE_CLASS 2
+#define INVOKE_CACHE_SUPER 3
+
+#define ENABLE_GLOBAL_CACHE 1
+
 void vm_init() {
+    memset(&vm, 0, sizeof(vm));
     vm.pila_tope = vm.pila;
-    vm.chunk = NULL;
-    vm.ip = NULL;
-    vm.clausura_actual = NULL;
-    vm.debug_mode = false;
-    vm.step_mode = false;
-    vm.breakpoints = NULL;
-    vm.n_breakpoints = 0;
-    vm.profiling_mode = false;
-    vm.modulos_cargados = map_crear(); 
+    vm.modulos_cargados = map_crear();
+    vm.ht_vars_version = 1;
+    vm.jit_hot_threshold = 10;
+    vm.manual_memory_mode = false;
+    vm.mut_proximo = MUT_VAR;
 
 }
 
@@ -43,6 +52,26 @@ static Result result_desde_variable(Variable* v) {
     return res;
 }
 
+static Result res_num(double n) {
+    Result r = {0};
+    r.tipo = TIPO_NUMERO;
+    r.n = n;
+    return r;
+}
+
+static void asignar_variable_desde_result(Result* args, int i, int v_idx, TipoExacto te) {
+    vars[v_idx].tipo_ex = te;
+    vars[v_idx].mut = MUT_VAR;
+    vars[v_idx].tipo = args[i].tipo;
+    vars[v_idx].obj = args[i].obj;
+    if (vars[v_idx].tipo == TIPO_CADENA) vars[v_idx].val_str = args[i].s;
+    else if (vars[v_idx].tipo == TIPO_ARRAY) vars[v_idx].val_array = args[i].a;
+    else if (vars[v_idx].tipo == TIPO_MAP) vars[v_idx].val_map = args[i].m;
+    else if (vars[v_idx].tipo == TIPO_INSTANCIA) vars[v_idx].val_inst = args[i].inst;
+    else if (vars[v_idx].tipo == TIPO_ENUM) { vars[v_idx].enum_val = args[i].enum_val; vars[v_idx].enum_def = args[i].enum_def; }
+    else vars[v_idx].val_num = args[i].n;
+}
+
 static void shell_debug(Chunk* chunk, uint8_t* ip) {
     int offset = (int)(ip - chunk->codigo);
     printf("\n--- DEBUGGER ITSUKI (offset: %d) ---\n", offset);
@@ -50,7 +79,7 @@ static void shell_debug(Chunk* chunk, uint8_t* ip) {
     while (1) {
         printf("debug> ");
         if (!fgets(linea, sizeof(linea), stdin)) break;
-        if (linea[0] == 'p') { 
+        if (linea[0] == 'p') {
             printf("Pila: ");
             for (struct Result* p = vm.pila; p < vm.pila_tope; p++) {
                 if (p->tipo == TIPO_NUMERO) printf("[%g] ", p->n);
@@ -58,13 +87,13 @@ static void shell_debug(Chunk* chunk, uint8_t* ip) {
                 else printf("[obj] ");
             }
             printf("\n");
-        } else if (linea[0] == 's') { 
+        } else if (linea[0] == 's') {
             vm.step_mode = true;
             break;
-        } else if (linea[0] == 'c') { 
+        } else if (linea[0] == 'c') {
             vm.step_mode = false;
             break;
-        } else if (linea[0] == 'h') { 
+        } else if (linea[0] == 'h') {
             printf("Comandos: p (pila), s (paso a paso), c (continuar), h (ayuda)\n");
         }
     }
@@ -142,12 +171,13 @@ Result vm_ejecutar(Chunk* c_rec) {
     if (!c_rec || !c_rec->codigo) return (Result){.tipo = TIPO_NULO};
     Chunk* chunk = c_rec;
     uint8_t* ip = chunk->codigo;
+    Chunk* chunk_previo = vm.chunk;
     vm.chunk = chunk;
     
     uint8_t* ip_previo = vm.ip;
-    
+
     if (setjmp(vm.recover_jmp)) {
-        ip = vm.ip; 
+        ip = vm.ip;
     }
 
 #ifdef __GNUC__
@@ -163,11 +193,14 @@ Result vm_ejecutar(Chunk* c_rec) {
         &&do_OP_INVOQUE_METODO, &&do_OP_SUPER, &&do_OP_CLOSURE,
         &&do_OP_OBTENER_UPVALUE, &&do_OP_ESTABLECER_UPVALUE,
         &&do_OP_ITER_INIT, &&do_OP_ITER_NEXT, &&do_OP_ITER_DONE, &&do_OP_ARRAY_APPEND, &&do_OP_ARRAY_CREAR,
+        &&do_OP_MAP_CREAR, &&do_OP_ESTABLECER_INDICE,
         &&do_OP_IMPORTAR, &&do_OP_LANZAR_ERROR, &&do_OP_DEFINIR_CON_TIPO,
         &&do_OP_ENUM, &&do_OP_ENUM_INSTANCIA, &&do_OP_ES_TIPO,
-        &&do_OP_TRY_BEGIN, &&do_OP_TRY_END, &&do_OP_LANZAR, &&do_OP_FINALLY_END, &&do_OP_MARCAR_EXPORT
+        &&do_OP_TRY_BEGIN, &&do_OP_TRY_END, &&do_OP_LANZAR, &&do_OP_FINALLY_END, &&do_OP_MARCAR_EXPORT,
+        &&do_OP_MARCAR_MUT, &&do_OP_NOP, &&do_OP_CONST_SUMA, &&do_OP_CONST_RESTA, &&do_OP_CONST_MULT, &&do_OP_CONST_DIV
     };
     #define CASE(op) do_##op:
+    #define DISPATCH_TABLE_LEN ((int)(sizeof(dispatch_table) / sizeof(dispatch_table[0])))
     #define DISPATCH() \
         do { \
             if (vm.debug_mode) { \
@@ -176,7 +209,13 @@ Result vm_ejecutar(Chunk* c_rec) {
                 if(vm.step_mode) shell_debug(chunk, ip); \
             } \
             vm.ip = ip; \
-            goto *dispatch_table[*ip++]; \
+            do { \
+                uint8_t op__ = *ip++; \
+                if ((int)op__ < 0 || (int)op__ >= DISPATCH_TABLE_LEN) { \
+                    lanzar_error(ERROR_SINTAXIS, "Opcode desconocido %d", (int)op__); \
+                } \
+                goto *dispatch_table[op__]; \
+            } while (0); \
         } while (0)
     DISPATCH();
 #else
@@ -199,9 +238,9 @@ Result vm_ejecutar(Chunk* c_rec) {
         empujar(chunk->constantes[idx]);
         DISPATCH();
     }
-    CASE(OP_NULO) { empujar((Result){.tipo = TIPO_NULO}); DISPATCH(); }
-    CASE(OP_VERDADERO) { empujar((Result){.tipo = TIPO_NUMERO, .n = 1}); DISPATCH(); }
-    CASE(OP_FALSO) { empujar((Result){.tipo = TIPO_NUMERO, .n = 0}); DISPATCH(); }
+    CASE(OP_NULO) { Result r = {0}; r.tipo = TIPO_NULO; empujar(r); DISPATCH(); }
+    CASE(OP_VERDADERO) { empujar(res_num(1)); DISPATCH(); }
+    CASE(OP_FALSO) { empujar(res_num(0)); DISPATCH(); }
     CASE(OP_POP) { extraer(); DISPATCH(); }
     CASE(OP_DEFINIR_GLOBAL) {
         uint8_t idx = *ip++; Result nombre = chunk->constantes[idx]; Result valor = extraer();
@@ -209,7 +248,12 @@ Result vm_ejecutar(Chunk* c_rec) {
         if (v_idx == -1) {
             v_idx = n_v++; strcpy(vars[v_idx].nombre, nombre.s); hash_insert(&ht_vars, vars[v_idx].nombre, v_idx);
             vars[v_idx].tipo_ex = TEX_AUTO; vars[v_idx].es_publico = vm.export_proximo; vm.export_proximo = false;
-        } else liberar_variable(&vars[v_idx]);
+        } else {
+            if (vars[v_idx].mut != MUT_VAR || vm.mut_proximo != MUT_VAR) {
+                lanzar_error(ERROR_TIPO, "Variable inmutable");
+            }
+            liberar_variable(&vars[v_idx]);
+        }
         vars[v_idx].tipo = valor.tipo; vars[v_idx].obj = valor.obj;
         if (valor.tipo == TIPO_CADENA) vars[v_idx].val_str = valor.s;
         else if (valor.tipo == TIPO_ARRAY) vars[v_idx].val_array = valor.a;
@@ -217,10 +261,21 @@ Result vm_ejecutar(Chunk* c_rec) {
         else if (valor.tipo == TIPO_INSTANCIA) vars[v_idx].val_inst = valor.inst;
         else if (valor.tipo == TIPO_ENUM) { vars[v_idx].enum_val = valor.enum_val; vars[v_idx].enum_def = valor.enum_def; }
         else vars[v_idx].val_num = valor.n;
+        vars[v_idx].mut = vm.mut_proximo;
+        vm.mut_proximo = MUT_VAR;
         DISPATCH();
     }
     CASE(OP_OBTENER_GLOBAL) {
         uint8_t idx = *ip++; Result nombre = chunk->constantes[idx];
+        int op_off = (int)(ip - chunk->codigo) - 2;
+        if (ENABLE_GLOBAL_CACHE && chunk->cache_global_idx && op_off >= 0 && op_off < chunk->cache_size) {
+            int cached = chunk->cache_global_idx[op_off];
+            uint32_t ver = chunk->cache_global_ver[op_off];
+            if (cached >= 0 && cached < n_v && ver == vm.ht_vars_version && !strcmp(vars[cached].nombre, nombre.s)) {
+                empujar(result_desde_variable(&vars[cached]));
+                DISPATCH();
+            }
+        }
         int v_idx = hash_lookup(&ht_vars, nombre.s);
         if (v_idx == -1) {
             if (vm.clausura_actual) {
@@ -228,9 +283,17 @@ Result vm_ejecutar(Chunk* c_rec) {
                     if (!strcmp(vm.clausura_actual->nombres_upvalues[i], nombre.s)) { empujar(vm.clausura_actual->upvalues[i]->closed); DISPATCH(); }
                 }
             }
-            int f_idx = hash_lookup(&ht_funcs, nombre.s); if (f_idx != -1) { empujar((Result){.tipo = TIPO_FUNCION, .func_index = f_idx}); DISPATCH(); }
+            int f_idx = hash_lookup(&ht_funcs, nombre.s);
+            if (f_idx != -1) {
+                if (strncmp(nombre.s, "socket", 6) == 0) fprintf(stderr, "[VM_GLO] Encontrada func socket: %s (idx=%d)\n", nombre.s, f_idx);
+                empujar((Result){.tipo = TIPO_FUNCION, .func_index = f_idx}); DISPATCH();
+            }
             int c_idx = hash_lookup(&ht_clases, nombre.s); if (c_idx != -1) { empujar((Result){.tipo = TIPO_CLASE, .clase_index = c_idx}); DISPATCH(); }
             lanzar_error(ERROR_NOMBRE, "Variable '%s' no definida", nombre.s);
+        }
+        if (ENABLE_GLOBAL_CACHE && chunk->cache_global_idx && op_off >= 0 && op_off < chunk->cache_size) {
+            chunk->cache_global_idx[op_off] = v_idx;
+            chunk->cache_global_ver[op_off] = vm.ht_vars_version;
         }
         empujar(result_desde_variable(&vars[v_idx]));
         DISPATCH();
@@ -239,6 +302,7 @@ Result vm_ejecutar(Chunk* c_rec) {
         uint8_t idx = *ip++; Result valor = extraer();
         int v_idx = hash_lookup(&ht_vars, chunk->constantes[idx].s);
         if (v_idx == -1) lanzar_error(ERROR_NOMBRE, "Variable no definida");
+        if (vars[v_idx].mut != MUT_VAR) lanzar_error(ERROR_TIPO, "Variable inmutable");
         if (vars[v_idx].tipo_ex != TEX_AUTO) aplicar_limites_tipo(&valor, vars[v_idx].tipo_ex);
         liberar_variable(&vars[v_idx]);
         vars[v_idx].tipo = valor.tipo; vars[v_idx].obj = valor.obj;
@@ -255,11 +319,26 @@ Result vm_ejecutar(Chunk* c_rec) {
     CASE(OP_ESTABLECER_LOCAL) { uint8_t offset = *ip++; vm.pila[offset] = extraer(); DISPATCH(); }
     CASE(OP_SUMA) {
         Result b = extraer(); Result a = extraer();
+        if ((a.tipo == TIPO_NUMERO || a.tipo == TIPO_BOOL) &&
+            (b.tipo == TIPO_NUMERO || b.tipo == TIPO_BOOL)) {
+            Result res_n = {0};
+            res_n.tipo = TIPO_NUMERO;
+            res_n.n = a.n + b.n;
+            empujar(res_n);
+            DISPATCH();
+        }
+        if (a.tipo == TIPO_CADENA && b.tipo == TIPO_CADENA) {
+            char* rs = malloc(strlen(a.s) + strlen(b.s) + 1);
+            strcpy(rs, a.s); strcat(rs, b.s);
+            Result res_s = gc_new_string(rs);
+            empujar(res_s); free(rs);
+            DISPATCH();
+        }
         if (a.tipo == TIPO_CADENA || b.tipo == TIPO_CADENA) {
-            char b1[1024], b2[1024];
-            if (a.tipo == TIPO_CADENA && a.s) strcpy(b1, a.s); else sprintf(b1, "%g", a.n);
-            if (b.tipo == TIPO_CADENA && b.s) strcpy(b2, b.s); else sprintf(b2, "%g", b.n);
-            char* rs = malloc(strlen(b1) + strlen(b2) + 1); strcpy(rs, b1); strcat(rs, b2);
+            Result s1 = result_to_string_gc(a);
+            Result s2 = result_to_string_gc(b);
+            char* rs = malloc(strlen(s1.s) + strlen(s2.s) + 1);
+            strcpy(rs, s1.s); strcat(rs, s2.s);
             Result res_s = gc_new_string(rs);
             empujar(res_s); free(rs);
         } else {
@@ -268,26 +347,84 @@ Result vm_ejecutar(Chunk* c_rec) {
         }
         DISPATCH();
     }
-    CASE(OP_RESTA) { Result b = extraer(); Result a = extraer(); empujar((Result){.tipo = TIPO_NUMERO, .n = a.n - b.n}); DISPATCH(); }
-    CASE(OP_MULT) { Result b = extraer(); Result a = extraer(); empujar((Result){.tipo = TIPO_NUMERO, .n = a.n * b.n}); DISPATCH(); }
-    CASE(OP_DIV) { Result b = extraer(); Result a = extraer(); if (b.n == 0) lanzar_error(ERROR_DIVISION_CERO, "Div por 0"); empujar((Result){.tipo = TIPO_NUMERO, .n = a.n / b.n}); DISPATCH(); }
-    CASE(OP_MODULO) { Result b = extraer(); Result a = extraer(); empujar((Result){.tipo = TIPO_NUMERO, .n = fmod(a.n, b.n)}); DISPATCH(); }
-    CASE(OP_NO) { Result a = extraer(); empujar((Result){.tipo = TIPO_NUMERO, .n = (a.n == 0) ? 1 : 0}); DISPATCH(); }
+    CASE(OP_CONST_SUMA) {
+        uint8_t idx = *ip++; Result c = chunk->constantes[idx]; Result a = extraer();
+        if ((a.tipo == TIPO_NUMERO || a.tipo == TIPO_BOOL) &&
+            (c.tipo == TIPO_NUMERO || c.tipo == TIPO_BOOL)) {
+            Result res_n = {0};
+            res_n.tipo = TIPO_NUMERO;
+            res_n.n = a.n + c.n;
+            empujar(res_n);
+            DISPATCH();
+        }
+        if (a.tipo == TIPO_CADENA && c.tipo == TIPO_CADENA) {
+            char* rs = malloc(strlen(a.s) + strlen(c.s) + 1);
+            strcpy(rs, a.s); strcat(rs, c.s);
+            Result res_s = gc_new_string(rs);
+            empujar(res_s); free(rs);
+            DISPATCH();
+        }
+        if (a.tipo == TIPO_CADENA || c.tipo == TIPO_CADENA) {
+            Result s1 = result_to_string_gc(a);
+            Result s2 = result_to_string_gc(c);
+            char* rs = malloc(strlen(s1.s) + strlen(s2.s) + 1);
+            strcpy(rs, s1.s); strcat(rs, s2.s);
+            Result res_s = gc_new_string(rs);
+            empujar(res_s); free(rs);
+        } else {
+            empujar(res_num(a.n + c.n));
+        }
+        DISPATCH();
+    }
+    CASE(OP_CONST_RESTA) {
+        uint8_t idx = *ip++; Result c = chunk->constantes[idx]; Result a = extraer();
+        Result res_n = {0};
+        res_n.tipo = TIPO_NUMERO;
+        res_n.n = a.n - c.n;
+        empujar(res_n);
+        DISPATCH();
+    }
+    CASE(OP_CONST_MULT) {
+        uint8_t idx = *ip++; Result c = chunk->constantes[idx]; Result a = extraer();
+        Result res_n = {0};
+        res_n.tipo = TIPO_NUMERO;
+        res_n.n = a.n * c.n;
+        empujar(res_n);
+        DISPATCH();
+    }
+    CASE(OP_CONST_DIV) {
+        uint8_t idx = *ip++; Result c = chunk->constantes[idx]; Result a = extraer();
+        if (c.n == 0) lanzar_error(ERROR_DIVISION_CERO, "Div por 0");
+        Result res_n = {0};
+        res_n.tipo = TIPO_NUMERO;
+        res_n.n = a.n / c.n;
+        empujar(res_n);
+        DISPATCH();
+    }
+    CASE(OP_RESTA) { Result b = extraer(); Result a = extraer(); empujar(res_num(a.n - b.n)); DISPATCH(); }
+    CASE(OP_MULT) { Result b = extraer(); Result a = extraer(); empujar(res_num(a.n * b.n)); DISPATCH(); }
+    CASE(OP_DIV) { Result b = extraer(); Result a = extraer(); if (b.n == 0) lanzar_error(ERROR_DIVISION_CERO, "Div por 0"); empujar(res_num(a.n / b.n)); DISPATCH(); }
+    CASE(OP_MODULO) { Result b = extraer(); Result a = extraer(); empujar(res_num(fmod(a.n, b.n))); DISPATCH(); }
+    CASE(OP_NO) { Result a = extraer(); empujar(res_num((a.n == 0) ? 1 : 0)); DISPATCH(); }
     CASE(OP_IGUAL) {
         Result b = extraer(); Result a = extraer(); bool m = false;
-        if (a.tipo == TIPO_CADENA && b.tipo == TIPO_CADENA) m = !strcmp(a.s, b.s);
-        else if (a.tipo == TIPO_NUMERO && b.tipo == TIPO_NUMERO) m = a.n == b.n;
-        empujar((Result){.tipo = TIPO_NUMERO, .n = m ? 1 : 0}); DISPATCH();
+        if ((a.tipo == TIPO_NUMERO || a.tipo == TIPO_BOOL) &&
+            (b.tipo == TIPO_NUMERO || b.tipo == TIPO_BOOL)) {
+            m = a.n == b.n;
+        } else if (a.tipo == TIPO_CADENA && b.tipo == TIPO_CADENA) {
+            m = (a.s == b.s) ? true : !strcmp(a.s, b.s);
+        }
+        empujar(res_num(m ? 1 : 0)); DISPATCH();
     }
-    CASE(OP_MAYOR) { Result b = extraer(); Result a = extraer(); empujar((Result){.tipo = TIPO_NUMERO, .n = (a.n > b.n) ? 1 : 0}); DISPATCH(); }
-    CASE(OP_MENOR) { Result b = extraer(); Result a = extraer(); empujar((Result){.tipo = TIPO_NUMERO, .n = (a.n < b.n) ? 1 : 0}); DISPATCH(); }
+    CASE(OP_MAYOR) { Result b = extraer(); Result a = extraer(); empujar(res_num((a.n > b.n) ? 1 : 0)); DISPATCH(); }
+    CASE(OP_MENOR) { Result b = extraer(); Result a = extraer(); empujar(res_num((a.n < b.n) ? 1 : 0)); DISPATCH(); }
     CASE(OP_SALTAR) { uint16_t off = (*ip++ << 8); off |= *ip++; ip = chunk->codigo + off; DISPATCH(); }
     CASE(OP_SALTAR_SI_FALSO) { uint16_t off = (*ip++ << 8); off |= *ip++; if (extraer().n == 0) ip = chunk->codigo + off; DISPATCH(); }
-    
+
     CASE(OP_LLAMAR) {
         uint8_t na = *ip++; Result fv = extraer();
         Result args[16]; for (int i = na - 1; i >= 0; i--) args[i] = extraer();
-        
+
         if (fv.tipo == TIPO_ENUM && fv.enum_def && fv.enum_val) {
             int vi = (int)(uintptr_t)fv.enum_val - 1; EnumDef* ed = fv.enum_def;
             if (ed->variantes[vi].n_campos != na) lanzar_error(ERROR_TIPO, "Campos incorrectos");
@@ -300,19 +437,43 @@ Result vm_ejecutar(Chunk* c_rec) {
         int fi = (fv.tipo == TIPO_FUNCION) ? fv.func_index : fv.clausura->func_index;
         for (int i=0; i<funcs[fi].n_params && i<na; i++) if (funcs[fi].param_tipos[i] != TEX_AUTO) aplicar_limites_tipo(&args[i], funcs[fi].param_tipos[i]);
 
-        if (es_funcion_builtin(funcs[fi].nombre)) { empujar(ejecutar_builtin(funcs[fi].nombre, args, na)); }
+        if (es_funcion_builtin(funcs[fi].nombre)) {
+            empujar(ejecutar_builtin(funcs[fi].nombre, args, na));
+        }
         else {
+            if (vm.jit_enabled && fv.tipo == TIPO_FUNCION && funcs[fi].chunk_bytecode && funcs[fi].jit_state >= 0) {
+                bool args_ok = (na >= funcs[fi].n_params);
+                if (args_ok) {
+                    for (int i = 0; i < funcs[fi].n_params; i++) {
+                        if (args[i].tipo != TIPO_NUMERO && args[i].tipo != TIPO_BOOL) { args_ok = false; break; }
+                    }
+                }
+                if (args_ok) {
+                    funcs[fi].jit_calls++;
+                    if (!funcs[fi].jit_ptr && funcs[fi].jit_calls >= vm.jit_hot_threshold) {
+                        if (!jit_compilar_funcion(fi)) funcs[fi].jit_state = -1;
+                    }
+                    if (funcs[fi].jit_ptr && funcs[fi].jit_state == 1) {
+                        Result res_jit;
+                        if (jit_ejecutar_funcion(fi, args, na, &res_jit)) {
+                            if (funcs[fi].tipo_retorno != TEX_AUTO) aplicar_limites_tipo(&res_jit, funcs[fi].tipo_retorno);
+                            empujar(res_jit);
+                            DISPATCH();
+                        }
+                    }
+                }
+            }
             HashNode* saved; hash_enter_scope(&saved); int old_nv = n_v;
             for (int i=0; i<funcs[fi].n_params && i<na; i++) {
-                int v = n_v++; strcpy(vars[v].nombre, funcs[fi].params[i]); vars[v].tipo_ex = funcs[fi].param_tipos[i];
-                vars[v].tipo = args[i].tipo; vars[v].obj = args[i].obj; 
+                int v = n_v++; strcpy(vars[v].nombre, funcs[fi].params[i]); vars[v].tipo_ex = funcs[fi].param_tipos[i]; vars[v].mut = MUT_VAR;
+                vars[v].tipo = args[i].tipo; vars[v].obj = args[i].obj;
                 if (vars[v].tipo == TIPO_CADENA) vars[v].val_str = args[i].s; else if (vars[v].tipo == TIPO_ARRAY) vars[v].val_array = args[i].a;
                 else if (vars[v].tipo == TIPO_MAP) vars[v].val_map = args[i].m; else if (vars[v].tipo == TIPO_INSTANCIA) vars[v].val_inst = args[i].inst;
                 else if (vars[v].tipo == TIPO_ENUM) { vars[v].enum_val = args[i].enum_val; vars[v].enum_def = args[i].enum_def; } else vars[v].val_num = args[i].n;
                 hash_insert(&ht_vars, vars[v].nombre, v);
             }
             Closure* prev_cl = vm.clausura_actual; vm.clausura_actual = (fv.tipo == TIPO_CLAUSURA) ? fv.clausura : NULL;
-            Result res; 
+            Result res;
             if (vm.profiling_mode) {
                 clock_t s = clock(); res = vm_ejecutar(funcs[fi].chunk_bytecode); clock_t e = clock();
                 double el = (double)(e - s) / CLOCKS_PER_SEC;
@@ -330,9 +491,11 @@ Result vm_ejecutar(Chunk* c_rec) {
         Result args[16]; for (int i = na - 1; i >= 0; i--) args[i] = extraer();
         if (fv.tipo != TIPO_FUNCION) lanzar_error(ERROR_TIPO, "TCO solo funciones simples");
         int fi = fv.func_index;
-        if (es_funcion_builtin(funcs[fi].nombre)) { 
+        if (es_funcion_builtin(funcs[fi].nombre)) {
             Result res_b = ejecutar_builtin(funcs[fi].nombre, args, na);
-            vm.ip = ip_previo; return res_b;
+            vm.ip = ip_previo;
+            vm.chunk = chunk_previo;
+            return res_b;
         }
         else {
             for (int i=0; i<na && i<funcs[fi].n_params; i++) {
@@ -346,9 +509,11 @@ Result vm_ejecutar(Chunk* c_rec) {
         }
         DISPATCH();
     }
-    CASE(OP_RETORNAR) { 
+    CASE(OP_RETORNAR) {
         Result res_ret = (vm.pila_tope > vm.pila) ? extraer() : (Result){.tipo = TIPO_NULO};
-        vm.ip = ip_previo; return res_ret;
+        vm.ip = ip_previo;
+        vm.chunk = chunk_previo;
+        return res_ret;
     }
     CASE(OP_PRINT) {
         uint8_t na = *ip++; Result args[16]; for (int i=na-1; i>=0; i--) args[i] = extraer();
@@ -388,49 +553,318 @@ Result vm_ejecutar(Chunk* c_rec) {
         while(cur && ii == -1) { for(int i=0; i<cur->n_metodos; i++) if(!strcmp(funcs[cur->indices_metodos[i]].nombre, "init")) { ii = cur->indices_metodos[i]; break; } cur = cur->clase_padre; }
         if (ii != -1) {
             Result args[16]; for (int i=na-1; i>=0; i--) args[i] = extraer();
-            HashNode* s; hash_enter_scope(&s); int onv = n_v; int ve = n_v++; strcpy(vars[ve].nombre, "este"); vars[ve].tipo = TIPO_INSTANCIA; vars[ve].val_inst = inst; vars[ve].obj = (Obj*)inst; hash_insert(&ht_vars, "este", ve);
-            for (int i=0; i<funcs[ii].n_params && i<na; i++) { int v = n_v++; strcpy(vars[v].nombre, funcs[ii].params[i]); vars[v].tipo = args[i].tipo; vars[v].obj = args[i].obj; if(vars[v].tipo==TIPO_CADENA) vars[v].val_str=args[i].s; else vars[v].val_num=args[i].n; hash_insert(&ht_vars, vars[v].nombre, v); }
+            HashNode* s; hash_enter_scope(&s); int onv = n_v; int ve = n_v++; strcpy(vars[ve].nombre, "este"); vars[ve].tipo = TIPO_INSTANCIA; vars[ve].val_inst = inst; vars[ve].obj = (Obj*)inst; vars[ve].mut = MUT_VAR; hash_insert(&ht_vars, "este", ve);
+            for (int i=0; i<funcs[ii].n_params && i<na; i++) { int v = n_v++; strcpy(vars[v].nombre, funcs[ii].params[i]); vars[v].tipo = args[i].tipo; vars[v].obj = args[i].obj; vars[v].mut = MUT_VAR; if(vars[v].tipo==TIPO_CADENA) vars[v].val_str=args[i].s; else vars[v].val_num=args[i].n; hash_insert(&ht_vars, vars[v].nombre, v); }
             vm_ejecutar(funcs[ii].chunk_bytecode); for(int i=onv; i<n_v; i++) liberar_variable(&vars[i]); n_v = onv; hash_exit_scope(&s);
         }
         empujar((Result){.tipo = TIPO_INSTANCIA, .inst = inst, .obj = (Obj*)inst}); DISPATCH();
     }
     CASE(OP_OBTENER_PROPIEDAD) {
+        int op_off = (int)(ip - chunk->codigo) - 1;
         Result pn = extraer(); Result o = extraer();
         if (o.tipo == TIPO_INSTANCIA) {
             Instancia* inst = o.inst;
-            for (int i=0; i<inst->clase->n_propiedades; i++) if(!strcmp(inst->clase->propiedades[i], pn.s)) { empujar(inst->valores_propiedades[i]); DISPATCH(); }
-            Clase* cur = inst->clase; while(cur) { for(int i=0; i<cur->n_metodos; i++) if(!strcmp(funcs[cur->indices_metodos[i]].nombre, pn.s)) { empujar((Result){.tipo=TIPO_FUNCION, .func_index=cur->indices_metodos[i]}); DISPATCH(); } cur = cur->clase_padre; }
+            if (pn.tipo == TIPO_CADENA && chunk->cache_prop_cls && op_off >= 0 && op_off < chunk->cache_size) {
+                if (chunk->cache_prop_cls[op_off] == inst->clase && chunk->cache_prop_name[op_off] == pn.s) {
+                    int idx = chunk->cache_prop_index[op_off];
+                    uint8_t kind = chunk->cache_prop_kind[op_off];
+                    if (kind == PROP_CACHE_PROP && idx >= 0 && idx < inst->clase->n_propiedades) {
+                        empujar(inst->valores_propiedades[idx]); DISPATCH();
+                    }
+                    if (kind == PROP_CACHE_METHOD && idx >= 0 && idx < n_f) {
+                        empujar((Result){.tipo=TIPO_FUNCION, .func_index=idx}); DISPATCH();
+                    }
+                }
+            }
+            for (int i=0; i<inst->clase->n_propiedades; i++) if(!strcmp(inst->clase->propiedades[i], pn.s)) {
+                if (pn.tipo == TIPO_CADENA && chunk->cache_prop_cls && op_off >= 0 && op_off < chunk->cache_size) {
+                    chunk->cache_prop_cls[op_off] = inst->clase;
+                    chunk->cache_prop_name[op_off] = pn.s;
+                    chunk->cache_prop_index[op_off] = i;
+                    chunk->cache_prop_kind[op_off] = PROP_CACHE_PROP;
+                }
+                empujar(inst->valores_propiedades[i]); DISPATCH();
+            }
+            Clase* cur = inst->clase;
+            while(cur) {
+                for(int i=0; i<cur->n_metodos; i++) if(!strcmp(funcs[cur->indices_metodos[i]].nombre, pn.s)) {
+                    if (pn.tipo == TIPO_CADENA && chunk->cache_prop_cls && op_off >= 0 && op_off < chunk->cache_size) {
+                        chunk->cache_prop_cls[op_off] = inst->clase;
+                        chunk->cache_prop_name[op_off] = pn.s;
+                        chunk->cache_prop_index[op_off] = cur->indices_metodos[i];
+                        chunk->cache_prop_kind[op_off] = PROP_CACHE_METHOD;
+                    }
+                    empujar((Result){.tipo=TIPO_FUNCION, .func_index=cur->indices_metodos[i]}); DISPATCH();
+                }
+                cur = cur->clase_padre;
+            }
+            lanzar_error(ERROR_NOMBRE, "Miembro no enc");
+        } else if (o.tipo == TIPO_CLASE) {
+            Clase* cls = &clases[o.clase_index];
+            if (pn.tipo == TIPO_CADENA && chunk->cache_prop_cls && op_off >= 0 && op_off < chunk->cache_size) {
+                if (chunk->cache_prop_cls[op_off] == cls && chunk->cache_prop_name[op_off] == pn.s &&
+                    chunk->cache_prop_kind[op_off] == PROP_CACHE_STATIC) {
+                    int idx = chunk->cache_prop_index[op_off];
+                    if (idx >= 0 && idx < cls->n_estaticos) {
+                        empujar(cls->valores_estaticos[idx]); DISPATCH();
+                    }
+                }
+            }
+            for (int i=0; i<cls->n_estaticos; i++) if(!strcmp(cls->nombres_estaticos[i], pn.s)) {
+                if (pn.tipo == TIPO_CADENA && chunk->cache_prop_cls && op_off >= 0 && op_off < chunk->cache_size) {
+                    chunk->cache_prop_cls[op_off] = cls;
+                    chunk->cache_prop_name[op_off] = pn.s;
+                    chunk->cache_prop_index[op_off] = i;
+                    chunk->cache_prop_kind[op_off] = PROP_CACHE_STATIC;
+                }
+                empujar(cls->valores_estaticos[i]); DISPATCH();
+            }
             lanzar_error(ERROR_NOMBRE, "Miembro no enc");
         } else if (o.tipo == TIPO_ENUM && o.enum_def) {
             EnumDef* ed = o.enum_def; for(int i=0; i<ed->n_variantes; i++) if(!strcmp(ed->variantes[i].nombre, pn.s)) { if(ed->variantes[i].n_campos==0) { EnumValor* ev = gc_alloc(sizeof(EnumValor), OBJ_ENUM_VAL); ev->definicion=ed; ev->variante_index=i; ev->valores=NULL; empujar((Result){.tipo=TIPO_ENUM, .enum_val=ev, .obj=(Obj*)ev}); } else empujar((Result){.tipo=TIPO_ENUM, .enum_def=ed, .enum_val=(EnumValor*)(uintptr_t)(i+1)}); DISPATCH(); }
             lanzar_error(ERROR_NOMBRE, "Variante no enc");
+        } else if (o.tipo == TIPO_ARRAY) {
+            if (pn.tipo != TIPO_NUMERO && pn.tipo != TIPO_BOOL) {
+                lanzar_error(ERROR_TIPO, "Indice debe ser numero");
+            }
+            int idx = (int)pn.n;
+            if (idx < 0 || idx >= o.a->tamano) {
+                lanzar_error(ERROR_INDICE, "Índice fuera de rango");
+            }
+            empujar(o.a->elementos[idx]); DISPATCH();
+        } else if (o.tipo == TIPO_MAP) {
+            if (pn.tipo != TIPO_CADENA) {
+                lanzar_error(ERROR_TIPO, "Clave debe ser cadena");
+            }
+            Result v = map_obtener(o.m, pn.s);
+            empujar(v); DISPATCH();
         } else if (o.tipo == TIPO_MODULO) { ObjModulo* m = (ObjModulo*)o.obj; Result v = map_obtener(m->exports, pn.s); if(v.tipo==TIPO_NULO) lanzar_error(ERROR_NOMBRE, "No en mod"); empujar(v); DISPATCH(); }
         DISPATCH();
     }
     CASE(OP_ESTABLECER_PROPIEDAD) {
+        int op_off = (int)(ip - chunk->codigo) - 1;
         uint8_t pi = *ip++; Result pn = chunk->constantes[pi]; Result o = extraer(); Result v = extraer();
-        if (o.tipo == TIPO_INSTANCIA) { Instancia* inst = o.inst; for (int i=0; i<inst->clase->n_propiedades; i++) if(!strcmp(inst->clase->propiedades[i], pn.s)) { inst->valores_propiedades[i] = v; empujar(v); DISPATCH(); } }
-        else if (o.tipo == TIPO_CLASE) { Clase* cls = &clases[o.clase_index]; for(int i=0; i<cls->n_estaticos; i++) if(!strcmp(cls->nombres_estaticos[i], pn.s)) { cls->valores_estaticos[i]=v; empujar(v); DISPATCH(); } }
+        if (o.tipo == TIPO_INSTANCIA) {
+            Instancia* inst = o.inst;
+            if (pn.tipo == TIPO_CADENA && chunk->cache_prop_cls && op_off >= 0 && op_off < chunk->cache_size) {
+                if (chunk->cache_prop_cls[op_off] == inst->clase && chunk->cache_prop_name[op_off] == pn.s &&
+                    chunk->cache_prop_kind[op_off] == PROP_CACHE_PROP) {
+                    int idx = chunk->cache_prop_index[op_off];
+                    if (idx >= 0 && idx < inst->clase->n_propiedades) {
+                        inst->valores_propiedades[idx] = v; empujar(v); DISPATCH();
+                    }
+                }
+            }
+            for (int i=0; i<inst->clase->n_propiedades; i++) if(!strcmp(inst->clase->propiedades[i], pn.s)) {
+                if (pn.tipo == TIPO_CADENA && chunk->cache_prop_cls && op_off >= 0 && op_off < chunk->cache_size) {
+                    chunk->cache_prop_cls[op_off] = inst->clase;
+                    chunk->cache_prop_name[op_off] = pn.s;
+                    chunk->cache_prop_index[op_off] = i;
+                    chunk->cache_prop_kind[op_off] = PROP_CACHE_PROP;
+                }
+                inst->valores_propiedades[i] = v; empujar(v); DISPATCH();
+            }
+        }
+        else if (o.tipo == TIPO_CLASE) {
+            Clase* cls = &clases[o.clase_index];
+            if (pn.tipo == TIPO_CADENA && chunk->cache_prop_cls && op_off >= 0 && op_off < chunk->cache_size) {
+                if (chunk->cache_prop_cls[op_off] == cls && chunk->cache_prop_name[op_off] == pn.s &&
+                    chunk->cache_prop_kind[op_off] == PROP_CACHE_STATIC) {
+                    int idx = chunk->cache_prop_index[op_off];
+                    if (idx >= 0 && idx < cls->n_estaticos) {
+                        cls->valores_estaticos[idx] = v; empujar(v); DISPATCH();
+                    }
+                }
+            }
+            for(int i=0; i<cls->n_estaticos; i++) if(!strcmp(cls->nombres_estaticos[i], pn.s)) {
+                if (pn.tipo == TIPO_CADENA && chunk->cache_prop_cls && op_off >= 0 && op_off < chunk->cache_size) {
+                    chunk->cache_prop_cls[op_off] = cls;
+                    chunk->cache_prop_name[op_off] = pn.s;
+                    chunk->cache_prop_index[op_off] = i;
+                    chunk->cache_prop_kind[op_off] = PROP_CACHE_STATIC;
+                }
+                cls->valores_estaticos[i]=v; empujar(v); DISPATCH();
+            }
+        }
+        else if (o.tipo == TIPO_ARRAY) {
+            if (pn.tipo != TIPO_NUMERO && pn.tipo != TIPO_BOOL) lanzar_error(ERROR_TIPO, "Indice debe ser numero");
+            int idx = (int)pn.n;
+            if (idx < 0 || idx >= o.a->tamano) lanzar_error(ERROR_INDICE, "Índice fuera de rango");
+            o.a->elementos[idx] = v; empujar(v); DISPATCH();
+        }
+        else if (o.tipo == TIPO_MAP) {
+            if (pn.tipo != TIPO_CADENA) lanzar_error(ERROR_TIPO, "Clave debe ser cadena");
+            map_establecer(o.m, pn.s, v); empujar(v); DISPATCH();
+        }
         lanzar_error(ERROR_NOMBRE, "Prop no enc"); DISPATCH();
     }
     CASE(OP_INVOQUE_METODO) {
+        int op_off = (int)(ip - chunk->codigo) - 1;
         uint8_t mi = *ip++; uint8_t na = *ip++; Result pn = chunk->constantes[mi]; Result o = extraer();
         if (o.tipo == TIPO_INSTANCIA) {
-            Instancia* inst = o.inst; int fi = -1; Clase* cur = inst->clase; while(cur && fi == -1) { for(int i=0; i<cur->n_metodos; i++) if(!strcmp(funcs[cur->indices_metodos[i]].nombre, pn.s)) { fi = cur->indices_metodos[i]; break; } cur = cur->clase_padre; }
+            Instancia* inst = o.inst;
+            int fi = -1;
+            if (chunk->cache_invoke_cls && op_off >= 0 && op_off < chunk->cache_size) {
+                if (chunk->cache_invoke_cls[op_off] == inst->clase &&
+                    chunk->cache_invoke_kind[op_off] == INVOKE_CACHE_INSTANCE) {
+                    int cached = chunk->cache_invoke_func[op_off];
+                    if (cached >= 0 && cached < n_f) fi = cached;
+                }
+            }
+            if (fi == -1) {
+                Clase* cur = inst->clase;
+                while(cur && fi == -1) {
+                    for(int i=0; i<cur->n_metodos; i++) if(!strcmp(funcs[cur->indices_metodos[i]].nombre, pn.s)) {
+                        fi = cur->indices_metodos[i];
+                        break;
+                    }
+                    cur = cur->clase_padre;
+                }
+                if (fi != -1 && chunk->cache_invoke_cls && op_off >= 0 && op_off < chunk->cache_size) {
+                    chunk->cache_invoke_cls[op_off] = inst->clase;
+                    chunk->cache_invoke_func[op_off] = fi;
+                    chunk->cache_invoke_kind[op_off] = INVOKE_CACHE_INSTANCE;
+                }
+            }
             if (fi != -1) {
-                Result args[16]; for (int i=na-1; i>=0; i--) args[i] = extraer(); HashNode* s; hash_enter_scope(&s); int onv = n_v; int ve = n_v++; strcpy(vars[ve].nombre, "este"); vars[ve].tipo = TIPO_INSTANCIA; vars[ve].val_inst = inst; vars[ve].obj = (Obj*)inst; hash_insert(&ht_vars, "este", ve);
-                for(int i=0; i<funcs[fi].n_params && i<na; i++) { int v = n_v++; strcpy(vars[v].nombre, funcs[fi].params[i]); vars[v].tipo = args[i].tipo; vars[v].obj = args[i].obj; if(vars[v].tipo==TIPO_CADENA) vars[v].val_str=args[i].s; else vars[v].val_num=args[i].n; hash_insert(&ht_vars, vars[v].nombre, v); }
+                Result args[16]; for (int i=na-1; i>=0; i--) args[i] = extraer(); HashNode* s; hash_enter_scope(&s); int onv = n_v; int ve = n_v++; strcpy(vars[ve].nombre, "este"); vars[ve].tipo = TIPO_INSTANCIA; vars[ve].val_inst = inst; vars[ve].obj = (Obj*)inst; vars[ve].mut = MUT_VAR; hash_insert(&ht_vars, "este", ve);
+                for(int i=0; i<funcs[fi].n_params && i<na; i++) { int v = n_v++; strcpy(vars[v].nombre, funcs[fi].params[i]); vars[v].tipo = args[i].tipo; vars[v].obj = args[i].obj; vars[v].mut = MUT_VAR; if(vars[v].tipo==TIPO_CADENA) vars[v].val_str=args[i].s; else vars[v].val_num=args[i].n; hash_insert(&ht_vars, vars[v].nombre, v); }
                 Result res = vm_ejecutar(funcs[fi].chunk_bytecode); for(int i=onv; i<n_v; i++) liberar_variable(&vars[i]); n_v = onv; hash_exit_scope(&s); empujar(res);
             } else lanzar_error(ERROR_NOMBRE, "Metodo no enc");
-        } DISPATCH();
+        } else if (o.tipo == TIPO_CLASE) {
+            Clase* cls = &clases[o.clase_index];
+            Result func_res = {0};
+            int fi = -1;
+            if (chunk->cache_invoke_cls && op_off >= 0 && op_off < chunk->cache_size) {
+                if (chunk->cache_invoke_cls[op_off] == cls &&
+                    chunk->cache_invoke_kind[op_off] == INVOKE_CACHE_CLASS) {
+                    int cached = chunk->cache_invoke_func[op_off];
+                    if (cached >= 0 && cached < n_f) {
+                        fi = cached;
+                        func_res.tipo = TIPO_FUNCION;
+                        func_res.func_index = cached;
+                    }
+                }
+            }
+            if (fi == -1) {
+                for (int i=0; i<cls->n_estaticos; i++) {
+                    if (!strcmp(cls->nombres_estaticos[i], pn.s)) {
+                        func_res = cls->valores_estaticos[i];
+                        if (func_res.tipo == TIPO_FUNCION) fi = func_res.func_index;
+                        else if (func_res.tipo == TIPO_CLAUSURA) fi = func_res.clausura->func_index;
+                        else lanzar_error(ERROR_TIPO, "No es funcion");
+                        if (func_res.tipo == TIPO_FUNCION && chunk->cache_invoke_cls && op_off >= 0 && op_off < chunk->cache_size) {
+                            chunk->cache_invoke_cls[op_off] = cls;
+                            chunk->cache_invoke_func[op_off] = fi;
+                            chunk->cache_invoke_kind[op_off] = INVOKE_CACHE_CLASS;
+                        }
+                        break;
+                    }
+                }
+            }
+            if (fi == -1) lanzar_error(ERROR_NOMBRE, "Metodo no enc");
+
+            Result args[16]; for (int i=na-1; i>=0; i--) args[i] = extraer();
+            for (int i=0; i<funcs[fi].n_params && i<na; i++) {
+                if (funcs[fi].param_tipos[i] != TEX_AUTO) aplicar_limites_tipo(&args[i], funcs[fi].param_tipos[i]);
+            }
+            if (es_funcion_builtin(funcs[fi].nombre)) {
+                empujar(ejecutar_builtin(funcs[fi].nombre, args, na));
+            } else {
+                HashNode* s; hash_enter_scope(&s); int onv = n_v;
+                for(int i=0; i<funcs[fi].n_params && i<na; i++) {
+                    int v = n_v++; strcpy(vars[v].nombre, funcs[fi].params[i]);
+                    asignar_variable_desde_result(args, i, v, funcs[fi].param_tipos[i]);
+                    hash_insert(&ht_vars, vars[v].nombre, v);
+                }
+                Closure* prev_cl = vm.clausura_actual;
+                vm.clausura_actual = (func_res.tipo == TIPO_CLAUSURA) ? func_res.clausura : NULL;
+                Result res;
+                if (vm.profiling_mode) {
+                    clock_t s_t = clock(); res = vm_ejecutar(funcs[fi].chunk_bytecode); clock_t e_t = clock();
+                    double el = (double)(e_t - s_t) / CLOCKS_PER_SEC;
+                    int pi = -1; for(int k=0; k<n_perfil; k++) if(!strcmp(perfil_datos[k].nombre_func, funcs[fi].nombre)) { pi = k; break; }
+                    if(pi == -1 && n_perfil < MAX_FUNCS) { pi = n_perfil++; strcpy(perfil_datos[pi].nombre_func, funcs[fi].nombre); perfil_datos[pi].tiempo_total = 0; perfil_datos[pi].llamadas = 0; }
+                    if(pi != -1) { perfil_datos[pi].tiempo_total += el; perfil_datos[pi].llamadas++; }
+                } else res = vm_ejecutar(funcs[fi].chunk_bytecode);
+                if (funcs[fi].tipo_retorno != TEX_AUTO) aplicar_limites_tipo(&res, funcs[fi].tipo_retorno);
+                vm.clausura_actual = prev_cl;
+                for(int i=onv; i<n_v; i++) liberar_variable(&vars[i]);
+                n_v = onv; hash_exit_scope(&s);
+                empujar(res);
+            }
+        } else if (o.tipo == TIPO_MODULO) {
+            ObjModulo* mod = (ObjModulo*)o.obj;
+            Result func_res = map_obtener(mod->exports, pn.s);
+            if (func_res.tipo == TIPO_NULO) lanzar_error(ERROR_NOMBRE, "Funcion no encontrada en modulo");
+            if (func_res.tipo == TIPO_FUNCION || func_res.tipo == TIPO_CLAUSURA) {
+                int fi = (func_res.tipo == TIPO_FUNCION) ? func_res.func_index : func_res.clausura->func_index;
+                Result args[16]; for (int i=na-1; i>=0; i--) args[i] = extraer();
+
+                for (int i=0; i<funcs[fi].n_params && i<na; i++) {
+                    if (funcs[fi].param_tipos[i] != TEX_AUTO) aplicar_limites_tipo(&args[i], funcs[fi].param_tipos[i]);
+                }
+
+                if (es_funcion_builtin(funcs[fi].nombre)) {
+                    empujar(ejecutar_builtin(funcs[fi].nombre, args, na));
+                } else {
+                    HashNode* s; hash_enter_scope(&s); int onv = n_v;
+                    for(int i=0; i<funcs[fi].n_params && i<na; i++) {
+                        int v = n_v++; strcpy(vars[v].nombre, funcs[fi].params[i]);
+                        asignar_variable_desde_result(args, i, v, funcs[fi].param_tipos[i]);
+                        hash_insert(&ht_vars, vars[v].nombre, v);
+                    }
+                    Closure* prev_cl = vm.clausura_actual;
+                    vm.clausura_actual = (func_res.tipo == TIPO_CLAUSURA) ? func_res.clausura : NULL;
+                    Result res;
+                    if (vm.profiling_mode) {
+                        clock_t s_t = clock(); res = vm_ejecutar(funcs[fi].chunk_bytecode); clock_t e_t = clock();
+                        double el = (double)(e_t - s_t) / CLOCKS_PER_SEC;
+                        int pi = -1; for(int k=0; k<n_perfil; k++) if(!strcmp(perfil_datos[k].nombre_func, funcs[fi].nombre)) { pi = k; break; }
+                        if(pi == -1 && n_perfil < MAX_FUNCS) { pi = n_perfil++; strcpy(perfil_datos[pi].nombre_func, funcs[fi].nombre); perfil_datos[pi].tiempo_total = 0; perfil_datos[pi].llamadas = 0; }
+                        if(pi != -1) { perfil_datos[pi].tiempo_total += el; perfil_datos[pi].llamadas++; }
+                    } else res = vm_ejecutar(funcs[fi].chunk_bytecode);
+                    if (funcs[fi].tipo_retorno != TEX_AUTO) aplicar_limites_tipo(&res, funcs[fi].tipo_retorno);
+                    vm.clausura_actual = prev_cl;
+                    for(int i=onv; i<n_v; i++) liberar_variable(&vars[i]);
+                    n_v = onv; hash_exit_scope(&s);
+                    empujar(res);
+                }
+            } else {
+                empujar(func_res);
+            }
+        }
+        DISPATCH();
     }
     CASE(OP_SUPER) {
+        int op_off = (int)(ip - chunk->codigo) - 1;
         uint8_t mi = *ip++; uint8_t na = *ip++; Result pn = chunk->constantes[mi]; int ve = hash_lookup(&ht_vars, "este"); if(ve==-1) lanzar_error(ERROR_NOMBRE, "super fuera de m");
         Instancia* inst = vars[ve].val_inst; Clase* pad = inst->clase->clase_padre; if(!pad) lanzar_error(ERROR_NOMBRE, "Sin padre");
-        int fi = -1; Clase* cur = pad; while(cur && fi == -1) { for(int i=0; i<cur->n_metodos; i++) if(!strcmp(funcs[cur->indices_metodos[i]].nombre, pn.s)) { fi = cur->indices_metodos[i]; break; } cur = cur->clase_padre; }
+        int fi = -1;
+        if (chunk->cache_invoke_cls && op_off >= 0 && op_off < chunk->cache_size) {
+            if (chunk->cache_invoke_cls[op_off] == pad &&
+                chunk->cache_invoke_kind[op_off] == INVOKE_CACHE_SUPER) {
+                int cached = chunk->cache_invoke_func[op_off];
+                if (cached >= 0 && cached < n_f) fi = cached;
+            }
+        }
+        if (fi == -1) {
+            Clase* cur = pad;
+            while(cur && fi == -1) {
+                for(int i=0; i<cur->n_metodos; i++) if(!strcmp(funcs[cur->indices_metodos[i]].nombre, pn.s)) {
+                    fi = cur->indices_metodos[i]; break;
+                }
+                cur = cur->clase_padre;
+            }
+            if (fi != -1 && chunk->cache_invoke_cls && op_off >= 0 && op_off < chunk->cache_size) {
+                chunk->cache_invoke_cls[op_off] = pad;
+                chunk->cache_invoke_func[op_off] = fi;
+                chunk->cache_invoke_kind[op_off] = INVOKE_CACHE_SUPER;
+            }
+        }
         if (fi != -1) {
-            Result args[16]; for (int i=na-1; i>=0; i--) args[i] = extraer(); HashNode* s; hash_enter_scope(&s); int onv = n_v; int ven = n_v++; strcpy(vars[ven].nombre, "este"); vars[ven].tipo = TIPO_INSTANCIA; vars[ven].val_inst = inst; vars[ven].obj = (Obj*)inst; hash_insert(&ht_vars, "este", ven);
-            for(int i=0; i<funcs[fi].n_params && i<na; i++) { int v = n_v++; strcpy(vars[v].nombre, funcs[fi].params[i]); vars[v].tipo = args[i].tipo; vars[v].obj = args[i].obj; if(vars[v].tipo==TIPO_CADENA) vars[v].val_str=args[i].s; else vars[v].val_num=args[i].n; hash_insert(&ht_vars, vars[v].nombre, v); }
+            Result args[16]; for (int i=na-1; i>=0; i--) args[i] = extraer(); HashNode* s; hash_enter_scope(&s); int onv = n_v; int ven = n_v++; strcpy(vars[ven].nombre, "este"); vars[ven].tipo = TIPO_INSTANCIA; vars[ven].val_inst = inst; vars[ven].obj = (Obj*)inst; vars[ven].mut = MUT_VAR; hash_insert(&ht_vars, "este", ven);
+            for(int i=0; i<funcs[fi].n_params && i<na; i++) { int v = n_v++; strcpy(vars[v].nombre, funcs[fi].params[i]); vars[v].tipo = args[i].tipo; vars[v].obj = args[i].obj; vars[v].mut = MUT_VAR; if(vars[v].tipo==TIPO_CADENA) vars[v].val_str=args[i].s; else vars[v].val_num=args[i].n; hash_insert(&ht_vars, vars[v].nombre, v); }
             Result res = vm_ejecutar(funcs[fi].chunk_bytecode); for(int i=onv; i<n_v; i++) liberar_variable(&vars[i]); n_v = onv; hash_exit_scope(&s); empujar(res);
         } DISPATCH();
     }
@@ -445,27 +879,68 @@ Result vm_ejecutar(Chunk* c_rec) {
     CASE(OP_OBTENER_UPVALUE) { uint8_t ix = *ip++; if(vm.clausura_actual) empujar(vm.clausura_actual->upvalues[ix]->closed); DISPATCH(); }
     CASE(OP_ESTABLECER_UPVALUE) { uint8_t ix = *ip++; if(vm.clausura_actual) vm.clausura_actual->upvalues[ix]->closed = extraer(); DISPATCH(); }
     CASE(OP_ITER_INIT) { Result iter = extraer(); if(iter.tipo!=TIPO_ARRAY) lanzar_error(ERROR_TIPO, "Array req"); vm.iterator_state.iterable=iter; vm.iterator_state.index=0; vm.iterator_state.size=iter.a->tamano; DISPATCH(); }
-    CASE(OP_ITER_NEXT) { if(vm.iterator_state.index < vm.iterator_state.size) { Result v = array_obtener(vm.iterator_state.iterable.a, vm.iterator_state.index++); empujar(v); empujar((Result){.tipo=TIPO_NUMERO, .n=1}); } else empujar((Result){.tipo=TIPO_NUMERO, .n=0}); DISPATCH(); }
-    CASE(OP_ITER_DONE) { empujar((Result){.tipo=TIPO_NUMERO, .n=(vm.iterator_state.index>=vm.iterator_state.size)?1:0}); DISPATCH(); }
+    CASE(OP_ITER_NEXT) { if(vm.iterator_state.index < vm.iterator_state.size) { Result v = array_obtener(vm.iterator_state.iterable.a, vm.iterator_state.index++); empujar(v); empujar(res_num(1)); } else empujar(res_num(0)); DISPATCH(); }
+    CASE(OP_ITER_DONE) { empujar(res_num((vm.iterator_state.index>=vm.iterator_state.size)?1:0)); DISPATCH(); }
     CASE(OP_ARRAY_APPEND) { Result v = extraer(); Result a = extraer(); if(a.tipo!=TIPO_ARRAY) lanzar_error(ERROR_TIPO, "Array req"); array_agregar(a.a, v); empujar(a); DISPATCH(); }
     CASE(OP_ARRAY_CREAR) { empujar(gc_new_array(10)); DISPATCH(); }
+    CASE(OP_MAP_CREAR) {
+        Map* m = map_crear();
+        Result r = {0};
+        r.tipo = TIPO_MAP;
+        r.m = m;
+        r.obj = (Obj*)m;
+        empujar(r);
+        DISPATCH();
+    }
+    CASE(OP_ESTABLECER_INDICE) {
+        Result valor = extraer();
+        Result indice = extraer();
+        Result receptor = extraer();
+        if (receptor.tipo == TIPO_ARRAY) {
+            if (indice.tipo != TIPO_NUMERO) lanzar_error(ERROR_TIPO, "Indice de array debe ser numero");
+            int ix = (int)indice.n;
+            if (ix < 0 || ix >= receptor.a->tamano) lanzar_error(ERROR_INDICE, "Indice fuera de rango");
+            receptor.a->elementos[ix] = valor;
+            empujar(valor);
+            DISPATCH();
+        }
+        if (receptor.tipo == TIPO_MAP) {
+            if (indice.tipo != TIPO_CADENA) lanzar_error(ERROR_TIPO, "Clave de mapa debe ser cadena");
+            map_establecer(receptor.m, indice.s, valor);
+            empujar(valor);
+            DISPATCH();
+        }
+        lanzar_error(ERROR_TIPO, "Receptor no indexable");
+        DISPATCH();
+    }
     CASE(OP_IMPORTAR) {
         uint8_t pi = *ip++; uint8_t ai = *ip++; uint8_t nn = *ip++; char* path = chunk->constantes[pi].s; ObjModulo* m = cargar_modulo(path);
-        if(nn==0) { char* alias = (ai==0xff)?NULL:chunk->constantes[ai].s; char* fa = alias?my_strdup(alias):nombre_base(path); int vi=hash_lookup(&ht_vars, fa); if(vi==-1) vi=n_v++; strcpy(vars[vi].nombre, fa); vars[vi].tipo=TIPO_MODULO; vars[vi].obj=(Obj*)m; hash_insert(&ht_vars, vars[vi].nombre, vi); free(fa); }
-        else for(int i=0; i<nn; i++) { uint8_t nci = *ip++; char* n = chunk->constantes[nci].s; Result val = map_obtener(m->exports, n); if(val.tipo==TIPO_NULO) lanzar_error(ERROR_SINTAXIS, "No en mod"); int vi=hash_lookup(&ht_vars, n); if(vi==-1) vi=n_v++; strcpy(vars[vi].nombre, n); vars[vi].tipo=val.tipo; vars[vi].obj=val.obj; if(val.tipo==TIPO_NUMERO) vars[vi].val_num=val.n; else if(val.tipo==TIPO_CADENA) vars[vi].val_str=val.s; hash_insert(&ht_vars, vars[vi].nombre, vi); }
+        if(nn==0) { char* alias = (ai==0xff)?NULL:chunk->constantes[ai].s; char* fa = alias?my_strdup(alias):nombre_base(path); int vi=hash_lookup(&ht_vars, fa); if(vi==-1) vi=n_v++; strcpy(vars[vi].nombre, fa); vars[vi].tipo=TIPO_MODULO; vars[vi].obj=(Obj*)m; vars[vi].mut = MUT_VAR; hash_insert(&ht_vars, vars[vi].nombre, vi); free(fa); }
+        else for(int i=0; i<nn; i++) { uint8_t nci = *ip++; char* n = chunk->constantes[nci].s; Result val = map_obtener(m->exports, n); if(val.tipo==TIPO_NULO) lanzar_error(ERROR_SINTAXIS, "No en mod"); int vi=hash_lookup(&ht_vars, n); if(vi==-1) vi=n_v++; strcpy(vars[vi].nombre, n); vars[vi].tipo=val.tipo; vars[vi].obj=val.obj; vars[vi].mut = MUT_VAR; if(val.tipo==TIPO_NUMERO) vars[vi].val_num=val.n; else if(val.tipo==TIPO_CADENA) vars[vi].val_str=val.s; hash_insert(&ht_vars, vars[vi].nombre, vi); }
         DISPATCH();
     }
     CASE(OP_LANZAR_ERROR) { uint8_t t = *ip++; lanzar_error(t, "Error lanzado desde bytecode"); DISPATCH(); }
     CASE(OP_DEFINIR_CON_TIPO) {
         uint8_t ni = *ip++; TipoExacto te = (TipoExacto)(*ip++); Result n = chunk->constantes[ni]; Result v = extraer(); aplicar_limites_tipo(&v, te);
-        int vi = hash_lookup(&ht_vars, n.s); if(vi==-1) { vi=n_v++; strcpy(vars[vi].nombre, n.s); hash_insert(&ht_vars, vars[vi].nombre, vi); vars[vi].es_publico = vm.export_proximo; vm.export_proximo = false; } else liberar_variable(&vars[vi]);
-        vars[vi].tipo_ex=te; vars[vi].tipo=v.tipo; vars[vi].obj=v.obj; if(v.tipo==TIPO_CADENA) vars[vi].val_str=v.s; else vars[vi].val_num=v.n; DISPATCH();
+        int vi = hash_lookup(&ht_vars, n.s);
+        if (vi == -1) {
+            vi = n_v++; strcpy(vars[vi].nombre, n.s); hash_insert(&ht_vars, vars[vi].nombre, vi); vars[vi].es_publico = vm.export_proximo; vm.export_proximo = false;
+        } else {
+            if (vars[vi].mut != MUT_VAR || vm.mut_proximo != MUT_VAR) {
+                lanzar_error(ERROR_TIPO, "Variable inmutable");
+            }
+            liberar_variable(&vars[vi]);
+        }
+        vars[vi].tipo_ex=te; vars[vi].tipo=v.tipo; vars[vi].obj=v.obj; if(v.tipo==TIPO_CADENA) vars[vi].val_str=v.s; else vars[vi].val_num=v.n;
+        vars[vi].mut = vm.mut_proximo;
+        vm.mut_proximo = MUT_VAR;
+        DISPATCH();
     }
     CASE(OP_ENUM) {
         uint8_t ni = *ip++; uint8_t nv = *ip++; EnumDef* ed = gc_alloc(sizeof(EnumDef), OBJ_ENUM_DEF); strcpy(ed->nombre, chunk->constantes[ni].s); ed->n_variantes = nv;
         for(int i=0; i<nv; i++) { uint8_t vni = *ip++; uint8_t nf = *ip++; strcpy(ed->variantes[i].nombre, chunk->constantes[vni].s); ed->variantes[i].n_campos = nf; }
         int vi = hash_lookup(&ht_vars, ed->nombre); if(vi==-1) { vi=n_v++; strcpy(vars[vi].nombre, ed->nombre); hash_insert(&ht_vars, ed->nombre, vi); }
-        vars[vi].tipo=TIPO_ENUM; vars[vi].enum_def=ed; vars[vi].obj=(Obj*)ed; vars[vi].es_publico=vm.export_proximo; vm.export_proximo=false; DISPATCH();
+        vars[vi].tipo=TIPO_ENUM; vars[vi].enum_def=ed; vars[vi].obj=(Obj*)ed; vars[vi].mut = MUT_VAR; vars[vi].es_publico=vm.export_proximo; vm.export_proximo=false; DISPATCH();
     }
     CASE(OP_ENUM_INSTANCIA) {
         uint8_t vi = *ip++; uint8_t na = *ip++; Result er = extraer(); if(er.tipo!=TIPO_ENUM) lanzar_error(ERROR_TIPO, "Enum req");
@@ -493,7 +968,7 @@ Result vm_ejecutar(Chunk* c_rec) {
             else if (!strcmp(name, "array") && a.tipo == TIPO_ARRAY) match = true;
             else if (!strcmp(name, "mapa") && a.tipo == TIPO_MAP) match = true;
         } else if (b.tipo == a.tipo) match = true;
-        empujar((Result){.tipo = TIPO_NUMERO, .n = match ? 1 : 0}); DISPATCH();
+        empujar(res_num(match ? 1 : 0)); DISPATCH();
     }
     CASE(OP_TRY_BEGIN) {
         uint16_t co = (*ip++ << 8); co |= *ip++; uint16_t fo = (*ip++ << 8); fo |= *ip++;
@@ -504,6 +979,8 @@ Result vm_ejecutar(Chunk* c_rec) {
     CASE(OP_LANZAR) { Result e = extraer(); vm.hay_error_pendiente = false; vm_unwind_to_handler(e); ip = vm.ip; DISPATCH(); }
     CASE(OP_FINALLY_END) { if (vm.hay_error_pendiente) { Result err = vm.error_pendiente; vm.hay_error_pendiente = false; vm_unwind_to_handler(err); } DISPATCH(); }
     CASE(OP_MARCAR_EXPORT) { vm.export_proximo = true; DISPATCH(); }
+    CASE(OP_MARCAR_MUT) { uint8_t m = *ip++; vm.mut_proximo = m; DISPATCH(); }
+    CASE(OP_NOP) { DISPATCH(); }
 
 #ifndef __GNUC__
     default: lanzar_error(ERROR_SINTAXIS, "Opcode desconocido %d", opcode);
@@ -511,6 +988,7 @@ Result vm_ejecutar(Chunk* c_rec) {
 }
 #endif
     vm.ip = ip_previo;
+    vm.chunk = chunk_previo;
     return (Result){.tipo = TIPO_NULO};
 }
 
@@ -528,47 +1006,58 @@ void vm_unwind_to_handler(Result error) {
 static ObjModulo* cargar_modulo(const char* path_orig) {
     Result match = map_obtener(vm.modulos_cargados, path_orig);
     if (match.tipo == TIPO_MODULO) return (ObjModulo*)match.obj;
+    #ifndef ITSUKI_BUNDLED
+    ObjModulo* native = itsuki_ext_cargar_modulo_nativo(path_orig);
+    if (native) {
+        Result mod_res = {.tipo = TIPO_MODULO, .obj = (Obj*)native};
+        map_establecer(vm.modulos_cargados, path_orig, mod_res);
+        if (strcmp(path_orig, native->path) != 0) {
+            map_establecer(vm.modulos_cargados, native->path, mod_res);
+        }
+        return native;
+    }
+    #endif
     char* src = NULL; const char* path = path_orig;
     char p2[256];
     #ifdef ITSUKI_BUNDLED
-    for(int i=0; bundled_files[i].path; i++) { 
-        if(!strcmp(bundled_files[i].path, path_orig)) { 
-            src = my_strdup(bundled_files[i].content); 
-            break; 
-        } 
-        char p_ext[256]; 
-        sprintf(p_ext, "%s.suki", path_orig); 
-        if(!strcmp(bundled_files[i].path, p_ext)) { 
-            src = my_strdup(bundled_files[i].content); 
-            path = bundled_files[i].path; 
-            break; 
-        } 
+    for(int i=0; bundled_files[i].path; i++) {
+        if(!strcmp(bundled_files[i].path, path_orig)) {
+            src = my_strdup(bundled_files[i].content);
+            break;
+        }
+        char p_ext[256];
+        sprintf(p_ext, "%s.suki", path_orig);
+        if(!strcmp(bundled_files[i].path, p_ext)) {
+            src = my_strdup(bundled_files[i].content);
+            path = bundled_files[i].path;
+            break;
+        }
     }
     #endif
     if (!src) {
         FILE* file = fopen(path, "rb");
-        if (!file) { 
-            if (!strstr(path, ".suki")) { 
-                sprintf(p2, "%s.suki", path); 
-                file = fopen(p2, "rb"); 
-                if (!file) lanzar_error(ERROR_ARCHIVO, "No se pudo abrir el modulo '%s'", path); 
-                path = p2; 
-            } else lanzar_error(ERROR_ARCHIVO, "No se pudo abrir el modulo '%s'", path); 
+        if (!file) {
+            if (!strstr(path, ".suki")) {
+                sprintf(p2, "%s.suki", path);
+                file = fopen(p2, "rb");
+                if (!file) lanzar_error(ERROR_ARCHIVO, "No se pudo abrir el modulo '%s'", path);
+                path = p2;
+            } else lanzar_error(ERROR_ARCHIVO, "No se pudo abrir el modulo '%s'", path);
         }
-        fseek(file, 0, SEEK_END); 
-        long sz = ftell(file); 
-        fseek(file, 0, SEEK_SET); 
-        src = malloc(sz + 1); 
+        fseek(file, 0, SEEK_END);
+        long sz = ftell(file);
+        fseek(file, 0, SEEK_SET);
+        src = malloc(sz + 1);
         if (fread(src, 1, sz, file) != (size_t)sz) {
             free(src);
             fclose(file);
             lanzar_error(ERROR_ARCHIVO, "No se pudo leer el modulo '%s'", path);
         }
-        src[sz] = 0; 
+        src[sz] = 0;
         fclose(file);
     }
-    ObjModulo* mod = (ObjModulo*)gc_alloc(sizeof(ObjModulo), OBJ_MODULO); 
-    strncpy(mod->path, path, 255); 
+    ObjModulo* mod = (ObjModulo*)gc_alloc(sizeof(ObjModulo), OBJ_MODULO);
+    strncpy(mod->path, path, 255);
     mod->path[255] = '\0';
     mod->exports = map_crear();
     map_establecer(vm.modulos_cargados, path_orig, (Result){.tipo = TIPO_MODULO, .obj = (Obj*)mod});

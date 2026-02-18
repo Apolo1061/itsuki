@@ -1,0 +1,35 @@
+importar "modules/time" como t
+
+print("TEST time extended")
+
+sea e = t.mktime_utc(1970, 1, 1, 0, 0, 0)
+si (e != 0) {
+    print("FAIL")
+    salir(1)
+}
+
+sea s = t.strftime("%Y-%m-%d", 0, 1)
+si (s != "1970-01-01") {
+    print("FAIL")
+    salir(1)
+}
+
+sea p1 = t.perf_counter_ms()
+t.sleep_ms(5)
+sea p2 = t.perf_counter_ms()
+si (p2 < p1) {
+    print("FAIL")
+    salir(1)
+}
+
+sea cpu = t.process_time_s()
+si (cpu < 0) {
+    print("FAIL")
+    salir(1)
+}
+
+t.localtime_ms()
+t.gmtime_ms()
+t.tz_offset_minutes()
+
+print("PASS")

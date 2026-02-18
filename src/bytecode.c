@@ -2,6 +2,40 @@
 
 #define MAGIC "SUKIBY"
 
+static void preparar_cache_chunk(Chunk* chunk) {
+    if (!chunk || chunk->contador <= 0) return;
+    if (chunk->cache_global_idx) free(chunk->cache_global_idx);
+    if (chunk->cache_global_ver) free(chunk->cache_global_ver);
+    if (chunk->cache_prop_cls) free(chunk->cache_prop_cls);
+    if (chunk->cache_prop_name) free(chunk->cache_prop_name);
+    if (chunk->cache_prop_index) free(chunk->cache_prop_index);
+    if (chunk->cache_prop_kind) free(chunk->cache_prop_kind);
+    if (chunk->cache_invoke_cls) free(chunk->cache_invoke_cls);
+    if (chunk->cache_invoke_func) free(chunk->cache_invoke_func);
+    if (chunk->cache_invoke_kind) free(chunk->cache_invoke_kind);
+    chunk->cache_size = chunk->contador;
+    chunk->cache_global_idx = malloc(sizeof(int) * chunk->cache_size);
+    chunk->cache_global_ver = malloc(sizeof(uint32_t) * chunk->cache_size);
+    chunk->cache_prop_cls = malloc(sizeof(Clase*) * chunk->cache_size);
+    chunk->cache_prop_name = malloc(sizeof(char*) * chunk->cache_size);
+    chunk->cache_prop_index = malloc(sizeof(int) * chunk->cache_size);
+    chunk->cache_prop_kind = malloc(sizeof(uint8_t) * chunk->cache_size);
+    chunk->cache_invoke_cls = malloc(sizeof(Clase*) * chunk->cache_size);
+    chunk->cache_invoke_func = malloc(sizeof(int) * chunk->cache_size);
+    chunk->cache_invoke_kind = malloc(sizeof(uint8_t) * chunk->cache_size);
+    for (int i = 0; i < chunk->cache_size; i++) {
+        chunk->cache_global_idx[i] = -1;
+        chunk->cache_global_ver[i] = 0;
+        chunk->cache_prop_cls[i] = NULL;
+        chunk->cache_prop_name[i] = NULL;
+        chunk->cache_prop_index[i] = -1;
+        chunk->cache_prop_kind[i] = 0;
+        chunk->cache_invoke_cls[i] = NULL;
+        chunk->cache_invoke_func[i] = -1;
+        chunk->cache_invoke_kind[i] = 0;
+    }
+}
+
 void guardar_bytecode(Chunk* chunk, const char* filename) {
     FILE* f = fopen(filename, "wb");
     if (!f) {
@@ -82,6 +116,9 @@ Chunk* cargar_bytecode(const char* filename) {
                 return NULL;
             }
             c.s[len] = 0;
+            Result gc_s = gc_new_string(c.s);
+            free(c.s);
+            c = gc_s;
         }
         agregar_constante(chunk, c);
     }
@@ -103,5 +140,6 @@ Chunk* cargar_bytecode(const char* filename) {
     }
 
     fclose(f);
+    preparar_cache_chunk(chunk);
     return chunk;
 }

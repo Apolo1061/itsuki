@@ -7,7 +7,7 @@ En Itsuki, las variables se definen con la palabra clave `sea`. El lenguaje tien
 
 ```python
 sea nombre = "Itsuki"
-sea version = 4.5
+sea version = 5.0
 sea edad = 18
 ```
 
@@ -15,7 +15,7 @@ sea edad = 18
 
 ```python
 sea nombre:string = "Itsuki"
-sea version:float = 4.5
+sea version:float = 5.0
 sea edad:int = 18
 ```
 

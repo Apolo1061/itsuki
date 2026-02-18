@@ -11,11 +11,14 @@
 #include <setjmp.h>
 #include <stdint.h>
 
+#define ITSUKI_VERSION "4.5.3"
+
 #define MAX_VARS 2048
 #define MAX_FUNCS 512
 #define MAX_MACROS 256
 #define MAX_ID_LEN 64
 #define MAX_TRY_DEPTH 128
+#define MAX_FUNC_PARAMS 64
 
 typedef struct {
     jmp_buf buf;
@@ -27,7 +30,7 @@ extern int try_sp;
 extern char error_pub_msg[1024];
 
 typedef enum {
-    TOKEN_SEA, TOKEN_PRINT, TOKEN_LEER,
+    TOKEN_SEA, TOKEN_LET, TOKEN_VAR, TOKEN_CONST, TOKEN_PRINT, TOKEN_LEER,
     TOKEN_FUNCION, TOKEN_RETORNAR, TOKEN_CLASE, TOKEN_NUEVA, TOKEN_HEREDA, TOKEN_IMPORTAR, TOKEN_EXPORTAR, TOKEN_DESDE, TOKEN_COMO,
     TOKEN_IDENTIFICADOR, TOKEN_NUMERO, TOKEN_CADENA,
     TOKEN_IGUAL, TOKEN_MAS, TOKEN_MENOS, TOKEN_MULT, TOKEN_DIV,
@@ -56,14 +59,15 @@ typedef enum {
     TOKEN_ARROBA, TOKEN_LAMBDA,
     TOKEN_ENUM, TOKEN_CASO, TOKEN_ES,
     TOKEN_C_INCLUIR, TOKEN_C_EXTERN,
+    TOKEN_VERDADERO, TOKEN_FALSO,
     TOKEN_PUNTO_COMA,
     TOKEN_EOF, TOKEN_ERROR
 } TipoToken;
 
-typedef struct { 
-    TipoToken tipo; 
-    char* valor; 
-    int linea; 
+typedef struct {
+    TipoToken tipo;
+    char* valor;
+    int linea;
 } Token;
 
 #include "itsuki_types.h"
@@ -82,24 +86,33 @@ typedef struct Variable {
     int clase_index;
     Obj* obj;
     bool es_publico;
+    uint8_t mut;
     TipoDato tipo;
-    TipoExacto tipo_ex; 
+    TipoExacto tipo_ex;
 } Variable;
+
+typedef enum {
+    MUT_VAR = 0,
+    MUT_LET = 1,
+    MUT_CONST = 2
+} VarMut;
 
 typedef struct Clase {
     char nombre[MAX_ID_LEN];
     bool es_publico;
     char** propiedades;
     bool* props_privadas;
+    int* props_owner;
     int n_propiedades;
     int* indices_metodos;
     bool* metodos_privados;
     bool* metodos_estaticos;
     int n_metodos;
     struct Clase* clase_padre;
-    
+
     char** nombres_estaticos;
     Result* valores_estaticos;
+    bool* estaticos_privados;
     int n_estaticos;
 } Clase;
 
@@ -110,6 +123,7 @@ typedef enum {
     AST_BINOP,
     AST_UNOP,
     AST_ASIGNACION,
+    AST_ASIGNACION_INDICE,
     AST_LLAMADA,
     AST_SI,
     AST_MIENTRAS,
@@ -132,6 +146,8 @@ typedef enum {
     AST_IMPORTAR,
     AST_C_INCLUIR,
     AST_C_EXTERN,
+    AST_ROMPER,
+    AST_CONTINUAR,
     AST_NULO
 } TipoNodoAST;
 
@@ -142,36 +158,44 @@ typedef struct NodoAST {
     bool es_estatico;
     bool es_privado;
     bool es_publico;
-    
+
     union {
         double numero;
         char* cadena;
         char* identificador;
-        
+
         struct {
             struct NodoAST* izquierda;
             struct NodoAST* derecha;
             int operador;
         } binop;
-        
+
         struct {
             struct NodoAST* operando;
             int operador;
         } unop;
-        
+
         struct {
             char* nombre;
             struct NodoAST* receptor;
             struct NodoAST* valor;
+            bool es_declaracion;
+            uint8_t var_mut;
         } asignacion;
-        
+
+        struct {
+            struct NodoAST* receptor;
+            struct NodoAST* indice;
+            struct NodoAST* valor;
+        } asignacion_indice;
+
         struct {
             char* nombre;
             struct NodoAST* receptor;
             struct NodoAST** args;
             int n_args;
         } llamada;
-        
+
         struct {
             struct NodoAST* condicion;
             struct NodoAST* bloque_si;
@@ -180,12 +204,12 @@ typedef struct NodoAST {
             struct NodoAST** elif_bloques;
             int n_elifs;
         } si;
-        
+
         struct {
             struct NodoAST* condicion;
             struct NodoAST* cuerpo;
         } mientras;
-        
+
         struct {
             char* var_nombre;
             struct NodoAST* inicio;
@@ -193,7 +217,7 @@ typedef struct NodoAST {
             struct NodoAST* paso;
             struct NodoAST* cuerpo;
         } para;
-        
+
         struct {
             char* nombre;
             char** params;
@@ -204,30 +228,30 @@ typedef struct NodoAST {
             struct NodoAST** decoradores;
             int n_decoradores;
         } funcion;
-        
+
         struct {
             struct NodoAST** sentencias;
             int count;
         } bloque;
-        
+
         struct {
             struct NodoAST** elementos;
             int count;
         } array;
-        
+
         struct {
             struct NodoAST** llaves;
             struct NodoAST** valores;
             int count;
         } mapa;
-        
+
         struct {
             char* nombre;
             char* padre;
             struct NodoAST** miembros;
             int n_miembros;
         } clase;
-        
+
         struct {
             struct NodoAST* expresion;
             char** variables;
@@ -247,7 +271,7 @@ typedef struct NodoAST {
         struct {
             char* header;
         } c_incluir;
-        
+
         struct {
             char* nombre;
             char* retorno;
@@ -343,6 +367,8 @@ typedef enum {
     OP_ITER_DONE,
     OP_ARRAY_APPEND,
     OP_ARRAY_CREAR,
+    OP_MAP_CREAR,
+    OP_ESTABLECER_INDICE,
     OP_IMPORTAR,
     OP_LANZAR_ERROR,
     OP_DEFINIR_CON_TIPO,
@@ -353,7 +379,13 @@ typedef enum {
     OP_TRY_END,
     OP_LANZAR,
     OP_FINALLY_END,
-    OP_MARCAR_EXPORT
+    OP_MARCAR_EXPORT,
+    OP_MARCAR_MUT,
+    OP_NOP,
+    OP_CONST_SUMA,
+    OP_CONST_RESTA,
+    OP_CONST_MULT,
+    OP_CONST_DIV
 } OpCode;
 
 typedef struct {
@@ -363,6 +395,16 @@ typedef struct {
     struct Result* constantes;
     int capacidad_constantes;
     int contador_constantes;
+    int* cache_global_idx;
+    uint32_t* cache_global_ver;
+    int cache_size;
+    struct Clase** cache_prop_cls;
+    const char** cache_prop_name;
+    int* cache_prop_index;
+    uint8_t* cache_prop_kind;
+    struct Clase** cache_invoke_cls;
+    int* cache_invoke_func;
+    uint8_t* cache_invoke_kind;
 } Chunk;
 
 typedef struct {
@@ -377,6 +419,8 @@ typedef struct {
     int n_breakpoints;
     bool profiling_mode;
     bool export_proximo;
+    uint8_t mut_proximo;
+    struct Array* cli_args;
     struct {
         Result iterable;
         int index;
@@ -393,6 +437,9 @@ typedef struct {
     Result error_pendiente;
     struct Map* modulos_cargados;
     bool manual_memory_mode;
+    uint32_t ht_vars_version;
+    bool jit_enabled;
+    int jit_hot_threshold;
 } VM;
 
 extern VM vm;
@@ -406,18 +453,22 @@ typedef struct {
 extern ProfileData perfil_datos[MAX_FUNCS];
 extern int n_perfil;
 
-typedef struct { 
-    char nombre[MAX_ID_LEN]; 
-    int pos; 
+typedef struct {
+    char nombre[MAX_ID_LEN];
+    int pos;
     int token_index;
-    char* source; 
-    char params[8][MAX_ID_LEN];
-    TipoExacto param_tipos[8];
+    char* source;
+    char params[MAX_FUNC_PARAMS][MAX_ID_LEN];
+    TipoExacto param_tipos[MAX_FUNC_PARAMS];
     int n_params;
     bool es_publico;
     struct NodoAST* cuerpo_ast;
-    Chunk* chunk_bytecode; 
+    Chunk* chunk_bytecode;
     TipoExacto tipo_retorno;
+    void* jit_ptr;
+    int jit_size;
+    int jit_calls;
+    int jit_state;
 } Funcion;
 
 typedef struct {
@@ -492,9 +543,9 @@ typedef struct {
     bool is_active;
 } PPLevel;
 
-typedef struct { 
-    const char* f; 
-    int p; 
+typedef struct {
+    const char* f;
+    int p;
     PPLevel pp_stack[32];
     int pp_depth;
 } Lexer;
@@ -551,6 +602,8 @@ Result gc_new_array();
 void vm_init();
 void vm_free();
 Result vm_ejecutar(Chunk* chunk);
+bool jit_compilar_funcion(int f_idx);
+bool jit_ejecutar_funcion(int f_idx, Result args[], int n_args, Result* out);
 
 void guardar_bytecode(Chunk* chunk, const char* filename);
 Chunk* cargar_bytecode(const char* filename);
@@ -579,6 +632,10 @@ void liberar_variable(Variable* v);
 bool es_funcion_builtin(const char* nombre);
 Result ejecutar_builtin(const char* nombre, Result args[], int n_args);
 void registrar_builtins();
+Result result_to_string_gc(Result r);
+ObjModulo* itsuki_ext_cargar_modulo_nativo(const char* path_orig);
+bool es_funcion_nativa_proxy(const char* nombre);
+Result ejecutar_nativa_proxy(const char* nombre, Result args[], int n_args);
 
 const char* obtener_nombre_error(TipoError tipo);
 
@@ -592,10 +649,40 @@ Result builtin_socket_listen(Result args[], int n_args);
 Result builtin_socket_accept(Result args[], int n_args);
 Result builtin_socket_connect(Result args[], int n_args);
 Result builtin_socket_send(Result args[], int n_args);
+Result builtin_socket_send_bytes(Result args[], int n_args);
+Result builtin_socket_send_all_bytes(Result args[], int n_args);
 Result builtin_socket_recv(Result args[], int n_args);
+Result builtin_socket_recv_bytes(Result args[], int n_args);
+Result builtin_socket_recv_exact_bytes(Result args[], int n_args);
+Result builtin_socket_recv_until_bytes(Result args[], int n_args);
 Result builtin_socket_sendto(Result args[], int n_args);
+Result builtin_socket_sendto_bytes(Result args[], int n_args);
 Result builtin_socket_recvfrom(Result args[], int n_args);
+Result builtin_socket_recvfrom_bytes(Result args[], int n_args);
 Result builtin_socket_close(Result args[], int n_args);
+Result builtin_socket_set_nonblocking(Result args[], int n_args);
+Result builtin_socket_select(Result args[], int n_args);
+Result builtin_socket_getsockname(Result args[], int n_args);
+Result builtin_socket_getpeername(Result args[], int n_args);
+Result builtin_socket_set_reuseaddr(Result args[], int n_args);
+Result builtin_socket_set_keepalive(Result args[], int n_args);
+Result builtin_socket_set_nodelay(Result args[], int n_args);
+Result builtin_socket_set_broadcast(Result args[], int n_args);
+Result builtin_socket_multicast_join(Result args[], int n_args);
+Result builtin_socket_multicast_leave(Result args[], int n_args);
+Result builtin_socket_last_error(Result args[], int n_args);
+Result builtin_socket_set_hdrincl(Result args[], int n_args);
+Result builtin_socket_sendto_raw(Result args[], int n_args);
+Result builtin_socket_setsockopt(Result args[], int n_args);
+Result builtin_socket_getsockopt(Result args[], int n_args);
+Result builtin_socket_set_timeout(Result args[], int n_args);
+Result builtin_socket_shutdown(Result args[], int n_args);
+
+Result builtin_time_now_ms(Result args[], int n_args);
+Result builtin_time_monotonic_ms(Result args[], int n_args);
+Result builtin_time_sleep_ms(Result args[], int n_args);
+Result builtin_time_format_utc_ms(Result args[], int n_args);
+Result builtin_time_format_local_ms(Result args[], int n_args);
 
 TipoExacto string_a_tipo_exacto(const char* s);
 const char* tipo_exacto_a_string(TipoExacto te);

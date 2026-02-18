@@ -1,0 +1,45 @@
+importar "modules/socket" como net
+
+print("TEST shutdown")
+
+sea srv = net.socket(net.AF_INET, net.SOCK_STREAM)
+net.bind(srv, "127.0.0.1", 19002)
+net.listen(srv, 1)
+
+sea cli = net.socket(net.AF_INET, net.SOCK_STREAM)
+net.connect(cli, "127.0.0.1", 19002)
+
+sea res = net.accept(srv)
+sea c = res[0]
+
+net.send(cli, "ping")
+sea srv_msg = net.recv(c, 4)
+si (srv_msg != "ping") {
+    print("FAIL")
+    salir(1)
+}
+
+sea r = net.shutdown(cli, net.SHUT_WR)
+si (r != 0) {
+    print("FAIL")
+    salir(1)
+}
+
+net.send(c, "pong")
+sea cli_msg = net.recv(cli, 4)
+si (cli_msg != "pong") {
+    print("FAIL")
+    salir(1)
+}
+
+sea eof = net.recv(c, 4)
+si (largo(eof) != 0) {
+    print("FAIL")
+    salir(1)
+}
+
+print("PASS")
+
+net.close(c)
+net.close(cli)
+net.close(srv)

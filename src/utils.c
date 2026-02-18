@@ -25,6 +25,7 @@ void hash_insert(HashTable* ht, const char* nombre, int index) {
     if (ht == &ht_vars) {
         node->scope_next = current_scope_nodes;
         current_scope_nodes = node;
+        vm.ht_vars_version++;
     } else {
         node->scope_next = NULL;
     }
@@ -46,14 +47,17 @@ void hash_enter_scope(HashNode** saved_scope) {
 }
 
 void hash_exit_scope(HashNode** saved_scope) {
+    bool changed = false;
     while(current_scope_nodes) {
         HashNode* n = current_scope_nodes;
         unsigned int h = hash(n->nombre);
         ht_vars.buckets[h] = n->next; 
         current_scope_nodes = n->scope_next;
         free(n);
+        changed = true;
     }
     current_scope_nodes = *saved_scope;
+    if (changed) vm.ht_vars_version++;
 }
 
 Array* array_crear(int cap) {
@@ -151,35 +155,33 @@ void lanzar_error(TipoError tipo, const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
     char buf[1024];
-    vsprintf(buf, fmt, args);
+    vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
-    
-    if (vm.exception_sp > 0) {
-        Result error_obj = {.tipo = TIPO_CADENA, .s = my_strdup(buf)};
-        vm_unwind_to_handler(error_obj);
-    }
-    
-    if (try_sp > 0) {
-        strcpy(error_pub_msg, buf); 
-        longjmp(try_stack[--try_sp].buf, 1);
-    }
-    
-    if(lsp_mode) {
+
+    /* En modo LSP no podemos escribir a stderr sin romper el protocolo. */
+    if (lsp_mode) {
         snprintf(lsp_error_msg, sizeof(lsp_error_msg), "Linea %d: %s", tk.linea, buf);
         longjmp(lsp_jmp, 1);
     }
 
-    if(repl_mode && strlen(ultima_linea_repl) > 0) {
-         fprintf(stderr, "  Linea %d: %s\n", tk.linea, ultima_linea_repl);
+    if (vm.exception_sp > 0) {
+        vm_unwind_to_handler(gc_new_string(buf));
+    }
+
+    if (try_sp > 0) {
+        strncpy(error_pub_msg, buf, sizeof(error_pub_msg) - 1);
+        error_pub_msg[sizeof(error_pub_msg) - 1] = '\0';
+        longjmp(try_stack[--try_sp].buf, 1);
     }
 
     fprintf(stderr, "%s: %s\n", obtener_nombre_error(tipo), buf);
-    
-    if(repl_mode) {
-        longjmp(error_jmp, 1);
-    } else {
-        exit(1);
+    if (repl_mode && strlen(ultima_linea_repl) > 0) {
+         fprintf(stderr, "  Linea %d: %s\n", tk.linea, ultima_linea_repl);
     }
+
+    vm.chunk = NULL;
+    vm.ip = NULL;
+    longjmp(error_jmp, 1);
 }
 
 TipoExacto string_a_tipo_exacto(const char* s) {

@@ -1,0 +1,26 @@
+importar "modules/socket" como net
+
+print("TEST accept puerto")
+
+sea srv = net.socket(net.AF_INET, net.SOCK_STREAM)
+net.bind(srv, "127.0.0.1", 19001)
+net.listen(srv, 1)
+
+sea cli = net.socket(net.AF_INET, net.SOCK_STREAM)
+net.connect(cli, "127.0.0.1", 19001)
+
+sea res = net.accept(srv)
+sea c = res[0]
+sea ip = res[1]
+sea port = res[2]
+
+si (tipo_de(c) == "socket" && ip == "127.0.0.1" && tipo_de(port) == "numero" && port > 0) {
+    print("PASS")
+} sino {
+    print("FAIL")
+    salir(1)
+}
+
+net.close(c)
+net.close(cli)
+net.close(srv)

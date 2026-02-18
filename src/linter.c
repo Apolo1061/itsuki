@@ -176,6 +176,7 @@ void itsuki_lint(const char* source) {
         NodoAST* n = parse_stmt();
         if (n) {
             lint_nodo(n);
+            free_ast(n);
         }
     }
     pop_scope();

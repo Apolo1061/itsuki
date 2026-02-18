@@ -1,0 +1,25 @@
+importar "modules/time" como t
+
+print("TEST time basic")
+
+sea s = t.format_utc_ms(0, "%Y-%m-%d")
+si (s != "1970-01-01") {
+    print("FAIL")
+    salir(1)
+}
+
+sea m1 = t.monotonic_ms()
+t.sleep_ms(20)
+sea m2 = t.monotonic_ms()
+si (m2 <= m1) {
+    print("FAIL")
+    salir(1)
+}
+
+sea n = t.now_ms()
+si (n <= 0) {
+    print("FAIL")
+    salir(1)
+}
+
+print("PASS")

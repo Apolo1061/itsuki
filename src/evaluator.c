@@ -200,6 +200,10 @@ Result evaluar_ast(NodoAST* n) {
 
         case AST_FUNCION: {
             int f_idx = n_f++;
+            funcs[f_idx].jit_ptr = NULL;
+            funcs[f_idx].jit_size = 0;
+            funcs[f_idx].jit_calls = 0;
+            funcs[f_idx].jit_state = 0;
             strcpy(funcs[f_idx].nombre, n->datos.funcion.nombre);
             funcs[f_idx].n_params = n->datos.funcion.n_params;
             for(int i=0; i<n->datos.funcion.n_params; i++) {

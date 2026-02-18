@@ -1,4 +1,4 @@
-# Documentacion de Itsuki Scripting v4.5
+# Documentacion de Itsuki Scripting v5.0
 Este lenguaje ha sido diseñado para ser simple, potente y modular, y para españoles este toma inspiración de lo mejor de Python3 y C.
 
 ## Índice de Contenidos

@@ -1,0 +1,2 @@
+importar "modules/time.dll" como t
+print(t.now_ms())

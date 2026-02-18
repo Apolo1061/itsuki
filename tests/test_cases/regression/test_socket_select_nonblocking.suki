@@ -1,0 +1,45 @@
+importar "modules/socket" como net
+
+print("TEST select nonblocking")
+
+sea srv = net.socket(net.AF_INET, net.SOCK_STREAM)
+net.set_reuseaddr(srv, 1)
+net.bind(srv, "127.0.0.1", 19004)
+net.listen(srv, 1)
+net.set_nonblocking(srv, 1)
+
+sea r0 = net.select([srv], [], 50)
+si (largo(r0[0]) != 0) {
+    print("FAIL")
+    salir(1)
+}
+
+sea cli = net.socket(net.AF_INET, net.SOCK_STREAM)
+net.connect(cli, "127.0.0.1", 19004)
+
+sea r1 = net.select([srv], [], 1000)
+si (largo(r1[0]) == 0) {
+    print("FAIL")
+    salir(1)
+}
+
+sea res = net.accept(srv)
+sea c = res[0]
+
+sea pn = net.getpeername(c)
+si (tipo_de(pn) != "array" || tipo_de(pn[0]) != "cadena" || tipo_de(pn[1]) != "numero" || pn[1] <= 0) {
+    print("FAIL")
+    salir(1)
+}
+
+sea sn = net.getsockname(cli)
+si (tipo_de(sn) != "array" || tipo_de(sn[0]) != "cadena" || tipo_de(sn[1]) != "numero" || sn[1] <= 0) {
+    print("FAIL")
+    salir(1)
+}
+
+print("PASS")
+
+net.close(c)
+net.close(cli)
+net.close(srv)

@@ -46,6 +46,16 @@ NodoAST* crear_nodo_asignacion(const char* nombre, NodoAST* valor) {
     NodoAST* n = crear_nodo(AST_ASIGNACION);
     n->datos.asignacion.nombre = my_strdup(nombre);
     n->datos.asignacion.valor = valor;
+    n->datos.asignacion.es_declaracion = false;
+    n->datos.asignacion.var_mut = MUT_VAR;
+    return n;
+}
+
+NodoAST* crear_nodo_asignacion_indice(NodoAST* receptor, NodoAST* indice, NodoAST* valor) {
+    NodoAST* n = crear_nodo(AST_ASIGNACION_INDICE);
+    n->datos.asignacion_indice.receptor = receptor;
+    n->datos.asignacion_indice.indice = indice;
+    n->datos.asignacion_indice.valor = valor;
     return n;
 }
 
@@ -174,6 +184,11 @@ void free_ast(NodoAST* n) {
         case AST_BINOP: free_ast(n->datos.binop.izquierda); free_ast(n->datos.binop.derecha); break;
         case AST_UNOP: free_ast(n->datos.unop.operando); break;
         case AST_ASIGNACION: free(n->datos.asignacion.nombre); free_ast(n->datos.asignacion.valor); break;
+        case AST_ASIGNACION_INDICE:
+            free_ast(n->datos.asignacion_indice.receptor);
+            free_ast(n->datos.asignacion_indice.indice);
+            free_ast(n->datos.asignacion_indice.valor);
+            break;
         case AST_LLAMADA:
             free(n->datos.llamada.nombre);
             for(int i=0; i<n->datos.llamada.n_args; i++) free_ast(n->datos.llamada.args[i]);
@@ -328,6 +343,14 @@ NodoAST* val() {
     else if (tk.tipo == TOKEN_NULO) {
         adv();
         return crear_nodo_nulo();
+    }
+    else if (tk.tipo == TOKEN_VERDADERO) {
+        adv();
+        return crear_nodo_numero(1);
+    }
+    else if (tk.tipo == TOKEN_FALSO) {
+        adv();
+        return crear_nodo_numero(0);
     }
     else if (tk.tipo == TOKEN_CORCHETE_IZQ) {
         adv();
@@ -517,11 +540,16 @@ NodoAST* val() {
         adv();
         if (tk.tipo != TOKEN_PAR_IZQ) lanzar_error(ERROR_SINTAXIS, "Se esperaba '(' tras lambda");
         adv();
-        char** params = malloc(sizeof(char*) * 8);
-        TipoExacto* param_tipos = malloc(sizeof(TipoExacto) * 8);
+        char** params = NULL;
+        TipoExacto* param_tipos = NULL;
         int n_params = 0;
         while (tk.tipo != TOKEN_PAR_DER && tk.tipo != TOKEN_EOF) {
             if (tk.tipo == TOKEN_IDENTIFICADOR) {
+                if (n_params >= MAX_FUNC_PARAMS) {
+                    lanzar_error(ERROR_SINTAXIS, "Lambda excede el maximo de %d parametros", MAX_FUNC_PARAMS);
+                }
+                params = realloc(params, sizeof(char*) * (n_params + 1));
+                param_tipos = realloc(param_tipos, sizeof(TipoExacto) * (n_params + 1));
                 params[n_params] = my_strdup(tk.valor);
                 adv();
                 param_tipos[n_params] = TEX_AUTO;
@@ -620,8 +648,9 @@ NodoAST* parse_stmt() {
     if (tk.tipo == TOKEN_EXPORTAR) {
         exportar = true;
         adv();
-        if (tk.tipo != TOKEN_SEA && tk.tipo != TOKEN_FUNCION && tk.tipo != TOKEN_CLASE && tk.tipo != TOKEN_ENUM) {
-                 lanzar_error(ERROR_SINTAXIS, "Se esperaba una declaracion (sea, funcion, clase, enum) tras 'exportar'");
+        if (tk.tipo != TOKEN_SEA && tk.tipo != TOKEN_LET && tk.tipo != TOKEN_VAR && tk.tipo != TOKEN_CONST &&
+            tk.tipo != TOKEN_FUNCION && tk.tipo != TOKEN_CLASE && tk.tipo != TOKEN_ENUM) {
+                 lanzar_error(ERROR_SINTAXIS, "Se esperaba una declaracion (sea/let/var/const, funcion, clase, enum) tras 'exportar'");
         }
     }
 
@@ -747,7 +776,10 @@ NodoAST* parse_stmt() {
         return crear_nodo_importar(path, NULL, nombres, n_nombres);
     }
 
-    if (tk.tipo == TOKEN_SEA) {
+    if (tk.tipo == TOKEN_SEA || tk.tipo == TOKEN_LET || tk.tipo == TOKEN_VAR || tk.tipo == TOKEN_CONST) {
+        uint8_t mut = MUT_VAR;
+        if (tk.tipo == TOKEN_LET) mut = MUT_LET;
+        else if (tk.tipo == TOKEN_CONST) mut = MUT_CONST;
         adv();
         char name[MAX_ID_LEN]; strcpy(name, tk.valor); adv();
         TipoExacto te = TEX_AUTO;
@@ -758,10 +790,14 @@ NodoAST* parse_stmt() {
         if (tk.tipo == TOKEN_IGUAL) {
             adv();
             val_node = logica();
+        } else if (mut != MUT_VAR) {
+            lanzar_error(ERROR_SINTAXIS, "Se esperaba un valor para la declaracion");
         }
         NodoAST* n = crear_nodo_asignacion(name, val_node);
         n->tipo_ex = te;
         if (exportar) n->es_publico = true;
+        n->datos.asignacion.es_declaracion = true;
+        n->datos.asignacion.var_mut = mut;
         return n;
     }
     else if (tk.tipo == TOKEN_ENUM) {
@@ -825,6 +861,14 @@ NodoAST* parse_stmt() {
         adv();
         NodoAST* expr = logica();
         return crear_nodo_lanzar(expr);
+    }
+    else if (tk.tipo == TOKEN_ROMPER) {
+        adv();
+        return crear_nodo(AST_ROMPER);
+    }
+    else if (tk.tipo == TOKEN_CONTINUAR) {
+        adv();
+        return crear_nodo(AST_CONTINUAR);
     }
     else if (tk.tipo == TOKEN_SI) {
         adv();
@@ -951,12 +995,9 @@ NodoAST* parse_stmt() {
             if(tk.tipo == TOKEN_IGUAL) {
                 adv();
                 NodoAST* val = logica();
-                NodoAST* n = crear_nodo(AST_ASIGNACION);
-                n->datos.binop.izquierda = crear_nodo_binop(crear_nodo_identificador(name), TOKEN_CORCHETE_IZQ, idx);
-                n->datos.binop.derecha = val;
-                n->tipo = AST_ASIGNACION;
-                return n;
+                return crear_nodo_asignacion_indice(crear_nodo_identificador(name), idx, val);
             }
+            free_ast(idx);
         }
         
         ts->current = start_pos;
@@ -985,6 +1026,9 @@ NodoAST* parse_stmt() {
         TipoExacto* param_tipos = NULL;
         int n_params = 0;
         while(tk.tipo == TOKEN_IDENTIFICADOR) {
+            if (n_params >= MAX_FUNC_PARAMS) {
+                lanzar_error(ERROR_SINTAXIS, "Funcion excede el maximo de %d parametros", MAX_FUNC_PARAMS);
+            }
             params = realloc(params, sizeof(char*) * (n_params + 1));
             param_tipos = realloc(param_tipos, sizeof(TipoExacto) * (n_params + 1));
             params[n_params] = my_strdup(tk.valor); adv();
